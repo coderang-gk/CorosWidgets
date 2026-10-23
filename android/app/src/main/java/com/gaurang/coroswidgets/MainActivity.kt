@@ -51,6 +51,7 @@ import com.gaurang.coroswidgets.data.LastRunData
 import com.gaurang.coroswidgets.data.MissedWorkoutData
 import com.gaurang.coroswidgets.data.WidgetRepository
 import com.gaurang.coroswidgets.notifications.CorosNotificationHelper
+import com.gaurang.coroswidgets.ui.ExpressiveTheme
 import com.gaurang.coroswidgets.ui.ExpressiveWidgetRenderer
 import com.gaurang.coroswidgets.widgets.*
 import java.util.Locale
@@ -94,8 +95,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val context = LocalContext.current
-            val isDark = isSystemInDarkTheme()
-            val colorScheme = if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            val colorScheme = ExpressiveTheme.getComposeColorScheme(context)
 
             var payload by remember { mutableStateOf(WidgetRepository.getCachedPayload(context)) }
             var isSyncing by remember { mutableStateOf(false) }
@@ -1304,16 +1304,16 @@ private fun AthleteSummaryHeroCard(payload: CorosWidgetPayload, isSyncing: Boole
                     modifier = Modifier.weight(1f),
                     label = "Acute Load",
                     value = "${tl.acuteTl}",
-                    sub = "${tl.statusBadge} · ${tl.readinessScore}%",
+                    sub = tl.statusBadge.lowercase().replaceFirstChar { it.uppercase() },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     shape = RoundedCornerShape(10.dp)
                 )
                 MetricPod(
                     modifier = Modifier.weight(1f),
-                    label = "EvoLab LT",
+                    label = "Threshold",
                     value = rc.currentLtsp.replace(" /km", ""),
-                    sub = "LTHR ${tl.lthr} · RHR ${tl.rhr}",
+                    sub = "${tl.lthr} bpm",
                     containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                     contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                     shape = RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp, topEnd = 22.dp, bottomEnd = 22.dp)
