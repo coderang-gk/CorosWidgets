@@ -6,6 +6,7 @@ credentials.json
 token.json
 synced_runs.json
 widget_cache.json
+llm_coach_cache.json
 
 # Python
 __pycache__/

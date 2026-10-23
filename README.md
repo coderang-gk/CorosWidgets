@@ -9,6 +9,7 @@ Built for runners who want more than raw stats—combining **post-run AI coachin
 ## ✨ Key Features
 
 ### 1. 🧠 AI Run Coach & Training Hub (Android App)
+- **Zero-Cost Built-In Coach + Optional Free Gemini / OpenAI LLM**: Works out of the box with **zero paid subscriptions or API keys** using a built-in COROS EvoLab Physiological Analyzer (evaluating your LTHR, Zone 2 ceiling, cardiac drift, stride length, running power, cadence, and plan adherence). Want generative LLM coaching? Drop in a **free Google AI Studio `GEMINI_API_KEY`** (or `OPENAI_API_KEY`) in `.env` and the server automatically caches LLM analysis per run.
 - **Executive Post-Run Verdict**: Automatically cross-references your completed COROS workout against your scheduled training plan (distance adherence, Zone 2 ceiling control vs. LTHR threshold stimulus, aerobic vs. anaerobic training effect).
 - **Deep AI Physiological & Form Insights**: Analyzes heart-rate drift, interval/stride power & stride-length mechanics, and biomechanical watchpoints (such as easy-day cadence turnover).
 - **Actionable Next-Run Tips**: Concrete pacing caps, progression rules, cadence cues, and fueling reminders tailored specifically to your next scheduled workout.
@@ -83,6 +84,10 @@ TOTAL_PLAN_WEEKS=10
 GOAL_TIME=1:45:00
 GOAL_PACE=4:58 /km
 GOAL_PACE_SEC=298
+
+# Optional: Free Gemini API key (https://aistudio.google.com/apikey) or OpenAI key
+# Leave blank to use the built-in zero-cost COROS EvoLab Physiological Coach!
+GEMINI_API_KEY=
 ```
 
 *(Optional)* If you keep your training plan on **Google Calendar** (e.g. events like `W3 Fri — Easy 7K + Strides` or `Long Run 20K`), place your Google Calendar API `credentials.json` and `token.json` inside `backend/` and set `GCAL_CALENDAR_NAME` in `.env`. If omitted, the server works standalone using your COROS activities!

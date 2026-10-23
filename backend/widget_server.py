@@ -10,16 +10,18 @@ import os
 import re
 import threading
 import time
+import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from coros_client import CorosClient
 from gcal_client import GCalClient
 
 BASE_DIR = Path(__file__).resolve().parent
 CACHE_FILE = BASE_DIR / "widget_cache.json"
+LLM_CACHE_FILE = BASE_DIR / "llm_coach_cache.json"
 ENV_FILE = BASE_DIR / ".env"
 
 
@@ -61,6 +63,115 @@ TOTAL_PLAN_WEEKS = int(os.getenv("TOTAL_PLAN_WEEKS", "10"))
 GOAL_TIME_STR = os.getenv("GOAL_TIME", "1:45:00")
 GOAL_PACE_STR = os.getenv("GOAL_PACE", "4:58 /km")
 GOAL_PACE_SEC = int(os.getenv("GOAL_PACE_SEC", "298"))
+
+# Optional LLM API Keys (Leave blank to use the built-in zero-cost EvoLab Physiological Coach)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+
+
+def _load_llm_cache() -> Dict[str, Dict[str, Any]]:
+    if LLM_CACHE_FILE.exists():
+        try:
+            with open(LLM_CACHE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_llm_cache(cache: Dict[str, Dict[str, Any]]) -> None:
+    try:
+        with open(LLM_CACHE_FILE, "w") as f:
+            json.dump(cache, f, indent=2)
+    except Exception as e:
+        print(f"[WARN] Could not save LLM coach cache: {e}")
+
+
+def generate_optional_llm_coaching(
+    activity_id: str,
+    run_context: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """
+    Optionally call Gemini (free tier via Google AI Studio) or OpenAI if the user configured
+    GEMINI_API_KEY or OPENAI_API_KEY in .env. Results are cached by activity_id on disk.
+    Returns None if no API key is configured or if the call fails, falling back to the
+    built-in COROS EvoLab Physiological Rule Engine.
+    """
+    if not GEMINI_API_KEY and not OPENAI_API_KEY:
+        return None
+
+    cache = _load_llm_cache()
+    if activity_id and activity_id in cache:
+        return cache[activity_id]
+
+    prompt = (
+        "You are an elite COROS EvoLab running coach. Analyze the following completed run "
+        "against the athlete's physiological profile, planned workout, and upcoming session.\n\n"
+        f"Context JSON:\n{json.dumps(run_context, indent=2)}\n\n"
+        "Respond ONLY with valid JSON matching this exact schema:\n"
+        "{\n"
+        '  "ai_verdict_headline": "Short punchy grade + headline (max 65 chars)",\n'
+        '  "ai_executive_summary": "2-sentence executive summary of execution, HR zone control, and stimulus",\n'
+        '  "ai_insights": ["Insight 1 (Aerobic/HR)", "Insight 2 (Pacing/Power/Splits)", "Insight 3 (Cadence/Stride Mechanics)"],\n'
+        '  "ai_tips": ["Tip 1 for Next Workout", "Tip 2 for Pacing/HR Cap", "Tip 3 for Fueling/Cadence/Recovery"]\n'
+        "}"
+    )
+
+    try:
+        if GEMINI_API_KEY:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+            body = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3},
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                raw_text = resp_data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(raw_text)
+        else:
+            url = "https://api.openai.com/v1/chat/completions"
+            body = {
+                "model": OPENAI_MODEL,
+                "response_format": {"type": "json_object"},
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                raw_text = resp_data["choices"][0]["message"]["content"]
+                parsed = json.loads(raw_text)
+
+        if (
+            isinstance(parsed, dict)
+            and parsed.get("ai_verdict_headline")
+            and isinstance(parsed.get("ai_insights"), list)
+            and isinstance(parsed.get("ai_tips"), list)
+        ):
+            if activity_id:
+                cache[activity_id] = parsed
+                _save_llm_cache(cache)
+            return parsed
+    except Exception as e:
+        print(f"[WARN] Optional LLM coaching call failed (using built-in physiological analyzer): {e}")
+
+    return None
 
 
 def clean_workout_title(raw_title: str) -> str:
@@ -449,6 +560,38 @@ def build_widget_payload() -> Dict[str, Any]:
                 "Easy-Day Rhythm: Use a 160 bpm playlist or metronome check for the first 2 km of easy runs to ingrain quicker, lighter footstrikes.",
                 "Pre-Run Hydration: Drink 300ml water + electrolytes 30 mins before heading out to keep cardiac drift under 4%."
             ]
+
+        # Optional LLM override if user configured GEMINI_API_KEY or OPENAI_API_KEY in .env
+        llm_override = generate_optional_llm_coaching(
+            activity_id=str(act.get("activity_id", "")),
+            run_context={
+                "goal_race": f"{RACE_NAME} ({GOAL_TIME_STR} @ {GOAL_PACE_STR})",
+                "athlete_lthr_bpm": lthr,
+                "athlete_z2_ceiling_bpm": z2_ceiling,
+                "athlete_lt_pace": ltsp_pace,
+                "workout_title": w_title,
+                "planned_distance_km": p_dist,
+                "planned_pace": p_pace,
+                "actual_distance_km": r_dist,
+                "avg_pace": r_pace,
+                "avg_hr": r_hr,
+                "max_hr": max_hr_val,
+                "avg_cadence_spm": r_cad,
+                "avg_power_watts": r_pow,
+                "max_power_watts": max_pow_val,
+                "stride_length_cm": stride_val,
+                "training_load": r_tl,
+                "aerobic_te": aer_te_val,
+                "anaerobic_te": ana_te_val,
+                "hr_zones": zones_list,
+                "next_workout": next_workout_payload,
+            },
+        )
+        if llm_override:
+            ai_headline = llm_override.get("ai_verdict_headline", ai_headline)
+            ai_summary = llm_override.get("ai_executive_summary", ai_summary)
+            ai_insights = llm_override.get("ai_insights", ai_insights)
+            ai_tips = llm_override.get("ai_tips", ai_tips)
 
         recent_runs_coaching.append({
             "activity_id": act.get("activity_id", ""),

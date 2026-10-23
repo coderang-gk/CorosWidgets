@@ -195,15 +195,15 @@ object ExpressiveWidgetRenderer {
                 "Z2 Aero",
                 "${zs.aerobicPct}%",
                 (zs.aerobicPct / 100f).coerceIn(0.35f, 0.92f),
-                p.secondaryContainer,
-                p.onSecondaryContainer
+                p.primary,
+                p.onPrimary
             ),
             BarSpec(
                 "Pune HM",
                 "${rc.daysLeft}d",
                 ((100 - rc.daysLeft).coerceIn(30, 88)) / 100f,
-                p.primaryContainer,
-                p.onPrimaryContainer
+                p.tertiaryContainer,
+                p.onTertiaryContainer
             )
         )
 
@@ -218,7 +218,7 @@ object ExpressiveWidgetRenderer {
         rows.forEachIndexed { idx, row ->
             val top = innerPad + idx * (barH + gap)
             val trackRect = RectF(barLeft, top, barRight, top + barH)
-            canvas.drawRoundRect(trackRect, barH / 2f, barH / 2f, fillPaint(p.surfaceContainerHighest))
+            canvas.drawRoundRect(trackRect, barH / 2f, barH / 2f, fillPaint(p.surfaceContainerLow))
 
             val save = canvas.save()
             val clipPath = Path().apply { addRoundRect(trackRect, barH / 2f, barH / 2f, Path.Direction.CW) }
@@ -233,7 +233,7 @@ object ExpressiveWidgetRenderer {
             val textY = trackRect.centerY() - (fm.ascent + fm.descent) / 2f
             canvas.drawText(row.label, barLeft + s * 0.046f, textY, labelPaint)
 
-            val valPaint = textPaint(p.onSurfaceVariant, s * 0.046f, bold = true, align = Paint.Align.RIGHT)
+            val valPaint = textPaint(p.onSurface, s * 0.046f, bold = true, align = Paint.Align.RIGHT)
             canvas.drawText(row.valueText, barRight - s * 0.042f, textY, valPaint)
         }
     }
@@ -253,7 +253,7 @@ object ExpressiveWidgetRenderer {
         val ringRadius = outerR - ringThickness / 2f
         val arcRect = RectF(cx - ringRadius, cy - ringRadius, cx + ringRadius, cy + ringRadius)
         val baseRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = p.primaryContainer
+            color = p.surfaceContainerLow
             style = Paint.Style.STROKE
             strokeWidth = ringThickness
         }
@@ -269,12 +269,12 @@ object ExpressiveWidgetRenderer {
         }
         canvas.drawArc(arcRect, -90f, sweep, false, progRingPaint)
 
-        drawLightningBolt(canvas, cx, cy - innerDiscR * 0.36f, s * 0.0025f, p.primary)
+        drawLightningBolt(canvas, cx, cy - innerDiscR * 0.36f, s * 0.0025f, p.tertiary)
 
-        val mainPaint = textPaint(p.onSurface, s * 0.11f, bold = true, align = Paint.Align.CENTER)
+        val mainPaint = textPaint(p.primary, s * 0.11f, bold = true, align = Paint.Align.CENTER)
         canvas.drawText("${tl.acuteTl}", cx, cy + s * 0.04f, mainPaint)
 
-        val subPaint = textPaint(p.onSurfaceVariant, s * 0.045f, bold = true, align = Paint.Align.CENTER)
+        val subPaint = textPaint(p.onSurface, s * 0.045f, bold = true, align = Paint.Align.CENTER)
         canvas.drawText("TL · ${tl.readinessScore}%", cx, cy + s * 0.115f, subPaint)
     }
 
@@ -355,7 +355,7 @@ object ExpressiveWidgetRenderer {
         val barR = s * 0.075f
 
         // Background track (Threshold / Speed 20% portion)
-        canvas.drawRoundRect(barRect, barR, barR, fillPaint(p.primaryContainer))
+        canvas.drawRoundRect(barRect, barR, barR, fillPaint(p.tertiaryContainer))
 
         // Foreground fill (Aerobic Z2 80% portion)
         val aeroFrac = (zs.aerobicPct / 100f).coerceIn(0.25f, 0.90f)
@@ -377,7 +377,7 @@ object ExpressiveWidgetRenderer {
             "${zs.thresholdPct}%",
             barRight - s * 0.035f,
             barRect.centerY() + s * 0.018f,
-            textPaint(p.onPrimaryContainer, s * 0.044f, bold = true, align = Paint.Align.RIGHT)
+            textPaint(p.onTertiaryContainer, s * 0.044f, bold = true, align = Paint.Align.RIGHT)
         )
 
         // Bottom-left typography ('75% / 25%' + '80/20 AEROBIC SPLIT' + HR summary)
@@ -409,7 +409,7 @@ object ExpressiveWidgetRenderer {
         val cy = s / 2f
         val outerR = s * 0.496f
 
-        canvas.drawCircle(cx, cy, outerR, fillPaint(p.surfaceContainerHigh))
+        canvas.drawCircle(cx, cy, outerR, fillPaint(p.surfaceContainerLow))
 
         // Normalized via createM3CookiePath so the scalloped peaks fill 95% of the entire circle!
         val cookie16 = createM3CookiePath(
@@ -419,17 +419,23 @@ object ExpressiveWidgetRenderer {
             lobes = 16,
             innerRatio = 0.86f
         )
-        canvas.drawPath(cookie16, fillPaint(p.primaryContainer))
+        canvas.drawPath(cookie16, fillPaint(p.surfaceContainerHigh))
 
         val rc = data.raceCountdown
-        val topPaint = textPaint(p.onPrimaryContainer, s * 0.062f, bold = true, align = Paint.Align.CENTER)
-        canvas.drawText("Pune HM", cx, cy - outerR * 0.38f, topPaint)
+        val topPaint = textPaint(p.onSurface, s * 0.060f, bold = true, align = Paint.Align.CENTER)
+        canvas.drawText("PUNE HM", cx, cy - outerR * 0.38f, topPaint)
 
-        val midPaint = textPaint(p.onPrimaryContainer, s * 0.22f, bold = true, align = Paint.Align.CENTER)
+        val midPaint = textPaint(p.primary, s * 0.22f, bold = true, align = Paint.Align.CENTER)
         canvas.drawText("${rc.daysLeft}d", cx, cy + s * 0.075f, midPaint)
 
-        val botPaint = textPaint(p.onPrimaryContainer, s * 0.058f, bold = true, align = Paint.Align.CENTER)
-        canvas.drawText(rc.currentLtsp, cx, cy + outerR * 0.52f, botPaint)
+        val pillW = s * 0.34f
+        val pillH = s * 0.105f
+        val pillTop = cy + outerR * 0.36f
+        val pillRect = RectF(cx - pillW / 2f, pillTop, cx + pillW / 2f, pillTop + pillH)
+        canvas.drawRoundRect(pillRect, pillH / 2f, pillH / 2f, fillPaint(p.tertiaryContainer))
+
+        val botPaint = textPaint(p.onTertiaryContainer, s * 0.048f, bold = true, align = Paint.Align.CENTER)
+        canvas.drawText(rc.currentLtsp, cx, pillRect.centerY() + s * 0.017f, botPaint)
     }
 
     // =========================================================================
@@ -440,13 +446,13 @@ object ExpressiveWidgetRenderer {
         val outer = RectF(pad, pad, s - pad, s - pad)
         val corner = s * 0.19f
 
-        canvas.drawRoundRect(outer, corner, corner, fillPaint(p.surfaceContainerHigh))
+        canvas.drawRoundRect(outer, corner, corner, fillPaint(p.surfaceContainerLow))
 
         val horizonY = pad + outer.height() * 0.25f
         val save = canvas.save()
         val clip = Path().apply { addRoundRect(outer, corner, corner, Path.Direction.CW) }
         canvas.clipPath(clip)
-        canvas.drawRect(pad, horizonY, s - pad, s - pad, fillPaint(p.primaryContainer))
+        canvas.drawRect(pad, horizonY, s - pad, s - pad, fillPaint(p.surfaceContainerHigh))
         canvas.restoreToCount(save)
 
         // Official M3 Cookie9Sided Badge straddling the horizon
@@ -466,16 +472,16 @@ object ExpressiveWidgetRenderer {
         canvas.drawRoundRect(iconRect, s * 0.009f, s * 0.009f, fillPaint(p.onTertiaryContainer))
 
         val wm = data.weeklyMileage
-        val subPaint = textPaint(p.onPrimaryContainer, s * 0.050f, bold = true)
+        val subPaint = textPaint(p.onSurface, s * 0.050f, bold = true)
         canvas.drawText("COROS Pace Pro", pad + s * 0.08f, horizonY + s * 0.18f, subPaint)
         canvas.drawText(
             "Week ${data.raceCountdown.currentWeek} · ${wm.runsCompleted}/${wm.runsPlanned} Runs",
             pad + s * 0.08f,
             horizonY + s * 0.26f,
-            subPaint
+            textPaint(p.onSurfaceVariant, s * 0.046f, bold = true)
         )
 
-        val heroPaint = textPaint(p.onPrimaryContainer, s * 0.17f, bold = true)
+        val heroPaint = textPaint(p.primary, s * 0.17f, bold = true)
         canvas.drawText(
             String.format(Locale.US, "%.1fK", wm.actualKm),
             pad + s * 0.075f,
@@ -528,8 +534,8 @@ object ExpressiveWidgetRenderer {
 
         items.forEachIndexed { idx, text ->
             val r = RectF(pillLeft, currTop, pillRight, currTop + pillH)
-            val bgCol = if (idx == 2) p.primary else p.primaryContainer
-            val txtCol = if (idx == 2) p.onPrimary else p.onPrimaryContainer
+            val bgCol = if (idx == 2) p.primary else p.surfaceContainerLow
+            val txtCol = if (idx == 2) p.onPrimary else p.onSurface
 
             when (idx) {
                 0 -> drawAsymmetricRoundRect(canvas, r, outerR, outerR, innerR, innerR, fillPaint(bgCol))
@@ -744,8 +750,8 @@ object ExpressiveWidgetRenderer {
             s - pad - s * 0.06f,
             s - pad - s * 0.07f
         )
-        canvas.drawRoundRect(pillRect, s * 0.07f, s * 0.07f, fillPaint(p.primaryContainer))
-        val pillText = textPaint(p.onPrimaryContainer, s * 0.12f, bold = true, align = Paint.Align.CENTER, condensed = true)
+        canvas.drawRoundRect(pillRect, s * 0.07f, s * 0.07f, fillPaint(p.tertiaryContainer))
+        val pillText = textPaint(p.onTertiaryContainer, s * 0.12f, bold = true, align = Paint.Align.CENTER, condensed = true)
         canvas.drawText("1:45", pillRect.centerX(), pillRect.centerY() + s * 0.044f, pillText)
     }
 
@@ -794,7 +800,7 @@ object ExpressiveWidgetRenderer {
                 value,
                 s - pad - s * 0.075f,
                 y,
-                textPaint(p.onSurface, s * 0.052f, bold = true, align = Paint.Align.RIGHT)
+                textPaint(p.primary, s * 0.052f, bold = true, align = Paint.Align.RIGHT)
             )
             if (idx < rows.lastIndex) {
                 val lineY = y + s * 0.052f
