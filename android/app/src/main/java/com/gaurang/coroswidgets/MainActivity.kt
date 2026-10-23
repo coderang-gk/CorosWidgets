@@ -44,9 +44,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.gaurang.coroswidgets.data.CorosWidgetPayload
 import com.gaurang.coroswidgets.data.ExpressiveTileType
 import com.gaurang.coroswidgets.data.LastRunData
+import com.gaurang.coroswidgets.data.MissedWorkoutData
 import com.gaurang.coroswidgets.data.WidgetRepository
 import com.gaurang.coroswidgets.notifications.CorosNotificationHelper
 import com.gaurang.coroswidgets.ui.ExpressiveWidgetRenderer
@@ -100,9 +102,12 @@ class MainActivity : ComponentActivity() {
             var selectedSection by remember { mutableIntStateOf(0) } // 0 = Training Hub, 1 = Widgets
             var selectedFilter by remember { mutableIntStateOf(0) } // 0 = All, 1 = Sculptural, 2 = Cards
             var showServerDialog by remember { mutableStateOf(false) }
+            var isResolvingMissed by remember { mutableStateOf(false) }
             var selectedRunForDetail by remember {
                 mutableStateOf(if (shouldOpenRunDetailFromIntent) payload.lastRun else null)
             }
+
+            val coroutineScope = rememberCoroutineScope()
 
             // Notification permission launcher for Android 13+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -134,6 +139,25 @@ class MainActivity : ComponentActivity() {
                     onFilterSelected = { selectedFilter = it },
                     catalog = catalog,
                     onRunClicked = { run -> selectedRunForDetail = run },
+                    onResolveMissedWorkout = { action, targetDate ->
+                        val missed = payload.missedWorkout ?: return@MainAppScaffold
+                        isResolvingMissed = true
+                        Thread {
+                            val res = WidgetRepository.resolveMissedWorkout(context, missed.eventId, action, targetDate)
+                            runOnUiThread {
+                                isResolvingMissed = false
+                                res.onSuccess { fresh ->
+                                    payload = fresh
+                                    CorosWidgetUpdateHelper.renderAllFromCache(context)
+                                    val msg = if (action == "SHIFT") "Shifted to $targetDate in Google Calendar" else "Workout marked [SKIPPED] in Google Calendar"
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                }.onFailure { err ->
+                                    Toast.makeText(context, "Failed: ${err.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }.start()
+                    },
+                    isResolvingMissed = isResolvingMissed,
                     onSyncClicked = {
                         isSyncing = true
                         CorosWidgetUpdateHelper.refreshAllWidgetsAsync(context, forceServerRefresh = true) { res ->
@@ -217,6 +241,8 @@ private fun MainAppScaffold(
     onFilterSelected: (Int) -> Unit,
     catalog: List<MainActivity.WidgetCatalogItem>,
     onRunClicked: (LastRunData) -> Unit,
+    onResolveMissedWorkout: (String, String) -> Unit = { _, _ -> },
+    isResolvingMissed: Boolean = false,
     onSyncClicked: () -> Unit,
     onSettingsClicked: () -> Unit,
     onPinWidget: (MainActivity.WidgetCatalogItem) -> Unit
@@ -309,7 +335,9 @@ private fun MainAppScaffold(
                 payload = payload,
                 isSyncing = isSyncing,
                 contentPadding = innerPadding,
-                onRunClicked = onRunClicked
+                onRunClicked = onRunClicked,
+                onResolveMissedWorkout = onResolveMissedWorkout,
+                isResolvingMissed = isResolvingMissed
             )
         } else {
             WidgetsGallerySection(
@@ -329,7 +357,9 @@ private fun TrainingHubSection(
     payload: CorosWidgetPayload,
     isSyncing: Boolean,
     contentPadding: PaddingValues,
-    onRunClicked: (LastRunData) -> Unit
+    onRunClicked: (LastRunData) -> Unit,
+    onResolveMissedWorkout: (String, String) -> Unit = { _, _ -> },
+    isResolvingMissed: Boolean = false
 ) {
     val runs = payload.recentRuns.ifEmpty { listOf(payload.lastRun) }
     val latest = runs.first()
@@ -341,6 +371,17 @@ private fun TrainingHubSection(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Missed Workout Resolution Card (if a past scheduled session wasn't logged)
+        if (payload.missedWorkout != null) {
+            item {
+                MissedWorkoutCoachCard(
+                    missed = payload.missedWorkout,
+                    isResolving = isResolvingMissed,
+                    onResolve = onResolveMissedWorkout
+                )
+            }
+        }
+
         // 1. Athlete Overview & Next Workout Card
         item {
             AthleteSummaryHeroCard(payload = payload, isSyncing = isSyncing)
@@ -1011,6 +1052,103 @@ private fun RunDetailModalBottomSheet(
                                 modifier = Modifier.weight(1f)
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MissedWorkoutCoachCard(
+    missed: MissedWorkoutData,
+    isResolving: Boolean,
+    onResolve: (action: String, targetDate: String) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "!",
+                            color = MaterialTheme.colorScheme.onError,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+                Column {
+                    Text(
+                        text = "MISSED WORKOUT DETECTED",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "${missed.title} (${missed.targetDistanceKm.toInt()}K)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = missed.coachAdvice,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = { onResolve("DROP", "") },
+                    enabled = !isResolving,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text(
+                        text = if (isResolving) "Updating..." else "Drop & Move On",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                if (missed.canShiftTo.isNotBlank()) {
+                    OutlinedButton(
+                        onClick = { onResolve("SHIFT", missed.canShiftTo) },
+                        enabled = !isResolving,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text(
+                            text = "Shift to ${missed.canShiftToLabel}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }

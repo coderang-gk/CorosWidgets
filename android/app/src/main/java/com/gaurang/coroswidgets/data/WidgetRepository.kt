@@ -102,6 +102,55 @@ object WidgetRepository {
         return Result.failure(lastError ?: IllegalStateException("Unable to reach server"))
     }
 
+    fun resolveMissedWorkout(
+        context: Context,
+        eventId: String,
+        action: String, // "DROP" or "SHIFT"
+        targetDate: String = ""
+    ): Result<CorosWidgetPayload> {
+        val primaryUrl = getServerUrl(context)
+        val candidates = listOf(primaryUrl, DEFAULT_SERVER_URL, TAILSCALE_SERVER_URL).distinct()
+        var lastError: Exception? = null
+
+        val reqBody = JSONObject().apply {
+            put("event_id", eventId)
+            put("action", action)
+            put("target_date", targetDate)
+        }.toString()
+
+        for (baseUrl in candidates) {
+            try {
+                val cleanBase = baseUrl.substringBefore("/api/v1/")
+                val targetUrl = "$cleanBase/api/v1/resolve-missed-workout"
+                val conn = (URL(targetUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 4000
+                    readTimeout = 12000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("Accept", "application/json")
+                }
+                conn.outputStream.use { os ->
+                    os.write(reqBody.toByteArray(Charsets.UTF_8))
+                }
+                val code = conn.responseCode
+                if (code !in 200..299) {
+                    throw IllegalStateException("HTTP $code from $targetUrl")
+                }
+                val body = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+                val parsed = parseJson(body)
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_CACHED_JSON, body)
+                    .apply()
+                return Result.success(parsed)
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        return Result.failure(lastError ?: IllegalStateException("Could not resolve missed workout"))
+    }
+
     fun parseJson(raw: String): CorosWidgetPayload {
         val root = JSONObject(raw)
         val athObj = root.optJSONObject("athlete") ?: JSONObject()
@@ -314,6 +363,20 @@ object WidgetRepository {
         val lrObj = root.optJSONObject("last_run") ?: JSONObject()
         val lastRun = parseRunObj(lrObj, "name")
 
+        val missedObj = root.optJSONObject("missed_workout")
+        val missedWorkout = if (missedObj != null) {
+            MissedWorkoutData(
+                eventId = missedObj.optString("event_id", ""),
+                title = missedObj.optString("title", ""),
+                date = missedObj.optString("date", ""),
+                targetDistanceKm = missedObj.optDouble("target_distance_km", 0.0),
+                workoutType = missedObj.optString("workout_type", "Run"),
+                canShiftTo = missedObj.optString("can_shift_to", ""),
+                canShiftToLabel = missedObj.optString("can_shift_to_label", "Today"),
+                coachAdvice = missedObj.optString("coach_advice", "")
+            )
+        } else null
+
         val recentArr = root.optJSONArray("recent_runs")
         val recentList = mutableListOf<LastRunData>()
         if (recentArr != null && recentArr.length() > 0) {
@@ -335,6 +398,7 @@ object WidgetRepository {
             zoneSpectrum = zoneSpectrum,
             raceCountdown = raceCountdown,
             lastRun = lastRun,
+            missedWorkout = missedWorkout,
             recentRuns = recentList
         )
     }

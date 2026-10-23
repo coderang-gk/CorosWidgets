@@ -119,6 +119,17 @@ data class RunSplitItem(
     val strideCm: Int
 )
 
+data class MissedWorkoutData(
+    val eventId: String = "",
+    val title: String = "",
+    val date: String = "",
+    val targetDistanceKm: Double = 0.0,
+    val workoutType: String = "Run",
+    val canShiftTo: String = "",
+    val canShiftToLabel: String = "",
+    val coachAdvice: String = ""
+)
+
 data class LastRunData(
     val name: String = "Easy + Strides",
     val date: String = "2026-10-23",
@@ -210,6 +221,7 @@ data class CorosWidgetPayload(
     val zoneSpectrum: ZoneSpectrumData = ZoneSpectrumData(),
     val raceCountdown: RaceCountdownData = RaceCountdownData(),
     val lastRun: LastRunData = LastRunData(),
+    val missedWorkout: MissedWorkoutData? = null,
     val recentRuns: List<LastRunData> = listOf(
         LastRunData(),
         LastRunData(

@@ -173,3 +173,54 @@ class GCalClient:
             "target_pace": pace,
             "target_hr_zone": zone,
         }
+
+    def skip_workout(
+        self,
+        event_id: str,
+        calendar_name: str = "Pune Half Marathon 2026 Training",
+    ) -> Dict[str, Any]:
+        """Mark a workout as [SKIPPED] in Google Calendar so it doesn't backlog."""
+        self._ensure_service()
+        cal_id = self.get_calendar_id_by_name(calendar_name)
+        ev = self.service.events().get(calendarId=cal_id, eventId=event_id).execute()
+        current_title = ev.get("summary", "")
+        if not current_title.startswith("[SKIPPED]"):
+            new_title = f"[SKIPPED] {current_title}"
+            return self.service.events().patch(
+                calendarId=cal_id,
+                eventId=event_id,
+                body={"summary": new_title},
+            ).execute()
+        return ev
+
+    def shift_workout(
+        self,
+        event_id: str,
+        target_date_str: str,
+        calendar_name: str = "Pune Half Marathon 2026 Training",
+    ) -> Dict[str, Any]:
+        """Move an event to a new target date (e.g. YYYY-MM-DD) in Google Calendar."""
+        self._ensure_service()
+        cal_id = self.get_calendar_id_by_name(calendar_name)
+        ev = self.service.events().get(calendarId=cal_id, eventId=event_id).execute()
+
+        current_title = ev.get("summary", "").replace("[SKIPPED] ", "").strip()
+        body: Dict[str, Any] = {"summary": current_title}
+
+        if "dateTime" in ev.get("start", {}):
+            old_start = ev["start"]["dateTime"]
+            old_end = ev.get("end", {}).get("dateTime", old_start)
+            # Replace YYYY-MM-DD prefix
+            new_start = f"{target_date_str}{old_start[10:]}"
+            new_end = f"{target_date_str}{old_end[10:]}"
+            body["start"] = {"dateTime": new_start}
+            body["end"] = {"dateTime": new_end}
+        else:
+            body["start"] = {"date": target_date_str}
+            body["end"] = {"date": target_date_str}
+
+        return self.service.events().patch(
+            calendarId=cal_id,
+            eventId=event_id,
+            body=body,
+        ).execute()

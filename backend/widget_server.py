@@ -219,6 +219,7 @@ def build_widget_payload() -> Dict[str, Any]:
     # 2. Fetch Google Calendar planned workouts (from Monday of current week to +10 days)
     planned_by_date: Dict[str, Dict[str, Any]] = {}
     upcoming_workouts: List[Dict[str, Any]] = []
+    missed_workout_payload: Optional[Dict[str, Any]] = None
     try:
         gcal = GCalClient(credentials_path=GCAL_CREDENTIALS_PATH, token_path=GCAL_TOKEN_PATH)
         start_dt = datetime.combine(monday, datetime.min.time()).replace(tzinfo=timezone.utc) - timedelta(days=1)
@@ -239,6 +240,29 @@ def build_widget_payload() -> Dict[str, Any]:
             if ev_date > today or (ev_date == today and not has_run_today and not ev.get("completed")):
                 if ev.get("target_distance_km", 0) > 0:
                     upcoming_workouts.append(ev)
+
+            # Detect uncompleted/missed workout earlier in the current week
+            if monday <= ev_date < today:
+                has_run_past = len(runs_by_date.get(ev_date_str, [])) > 0
+                is_skipped = "[SKIPPED]" in ev.get("title", "").upper()
+                if not has_run_past and not is_skipped and not ev.get("completed"):
+                    dist_km = float(ev.get("target_distance_km", 0.0))
+                    if dist_km > 0:
+                        clean_name = clean_workout_title(ev.get("title", "Run"))
+                        missed_workout_payload = {
+                            "event_id": str(ev.get("event_id", "")),
+                            "title": clean_name,
+                            "date": ev_date_str,
+                            "target_distance_km": dist_km,
+                            "workout_type": ev.get("workout_type", "Run"),
+                            "can_shift_to": today.strftime("%Y-%m-%d"),
+                            "can_shift_to_label": f"Today ({today.strftime('%a, %d %b')})",
+                            "coach_advice": (
+                                f"You missed '{clean_name}' ({dist_km:.0f}K). "
+                                "Coach recommendation: Drop it to protect your upcoming Long Run, "
+                                "or shift to a short recovery jog."
+                            ),
+                        }
     except Exception as e:
         print(f"[WARN] Google Calendar fetch error: {e}")
 
@@ -731,6 +755,7 @@ def build_widget_payload() -> Dict[str, Any]:
             "splits": latest_coaching.get("splits", []),
             "stages": latest_coaching.get("stages", []),
         },
+        "missed_workout": missed_workout_payload,
         "recent_runs": recent_runs_coaching,
     }
 
@@ -803,7 +828,28 @@ class WidgetRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"status": "not_found"}, status=404)
 
     def do_POST(self):
-        if self.path.startswith("/api/v1/refresh"):
+        if self.path.startswith("/api/v1/resolve-missed-workout"):
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body_bytes = self.rfile.read(length) if length > 0 else b"{}"
+                body = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+                event_id = body.get("event_id", "").strip()
+                action = body.get("action", "DROP").upper().strip()
+                target_date = body.get("target_date", "").strip()
+
+                if event_id:
+                    gcal = GCalClient(credentials_path=GCAL_CREDENTIALS_PATH, token_path=GCAL_TOKEN_PATH)
+                    if action == "SHIFT" and target_date:
+                        gcal.shift_workout(event_id, target_date, calendar_name=GCAL_CALENDAR_NAME)
+                    else:
+                        gcal.skip_workout(event_id, calendar_name=GCAL_CALENDAR_NAME)
+
+                data = get_cached_or_fresh(force_refresh=True)
+                self._send_json(data)
+            except Exception as e:
+                print(f"[ERROR] Failed to resolve missed workout: {e}")
+                self._send_json({"status": "error", "message": str(e)}, status=500)
+        elif self.path.startswith("/api/v1/refresh"):
             try:
                 data = get_cached_or_fresh(force_refresh=True)
                 self._send_json(data)
@@ -811,6 +857,13 @@ class WidgetRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "error", "message": str(e)}, status=500)
         else:
             self._send_json({"status": "not_found"}, status=404)
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
 
     def log_message(self, fmt, *args):
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {self.address_string()} - {fmt % args}")
