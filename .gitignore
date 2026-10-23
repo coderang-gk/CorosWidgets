@@ -1,0 +1,30 @@
+# Secrets & Credentials
+.env
+*.env
+!.env.example
+credentials.json
+token.json
+synced_runs.json
+widget_cache.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.log
+
+# Android / Gradle
+.gradle/
+build/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.iml
+.idea/
+.DS_Store
+*.apk
+*.aab
+*.keystore
+*.jks
