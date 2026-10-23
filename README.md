@@ -1,8 +1,20 @@
+<div align="center">
+
 # CorosWidgets
+
+<img src="assets/icon.png" width="128" height="128" alt="CorosWidgets App Icon" />
+
+### Material 3 Training Hub & Home-Screen Widgets for COROS Runners
+
+[![GitHub Release](https://img.shields.io/github/v/release/coderang-gk/CorosWidgets?style=flat-square&color=blue)](https://github.com/coderang-gk/CorosWidgets/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+[![Android](https://img.shields.io/badge/Android-12%2B%20(API%2031%2B)-green.svg?style=flat-square)](https://developer.android.com)
 
 An open-source Android companion app and Material 3 widget suite for runners using COROS watches, backed by a lightweight Python sync service.
 
-It synchronizes training metrics directly from the **COROS Training Hub API** (`teamapi.coros.com`) and your scheduled training plan on **Google Calendar**, providing post-run physiological analysis, active-days-only mileage tracking, and 12 native Material You home-screen widgets.
+Connects directly to the **COROS Training Hub API** (`teamapi.coros.com`) and your scheduled training plan on **Google Calendar** to provide post-run physiological analysis, active-days mileage tracking, and 12 Material You home-screen widgets.
+
+</div>
 
 ---
 
