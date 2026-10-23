@@ -174,6 +174,162 @@ def generate_optional_llm_coaching(
     return None
 
 
+def generate_missed_workout_coaching(
+    missed_ev: Dict[str, Any],
+    next_ev: Dict[str, Any],
+    athlete_lthr: int,
+    current_tl: int,
+    today_date: date,
+) -> Dict[str, Any]:
+    """
+    Dynamically reason about a missed session using LLM (if configured) or the built-in
+    COROS EvoLab physiological rule engine to evaluate risks, glycogen depletion, and next-day fatigue.
+    """
+    missed_title = clean_workout_title(missed_ev.get("title", "Run"))
+    missed_dist = float(missed_ev.get("target_distance_km", 0.0))
+    next_title = clean_workout_title(next_ev.get("title", "Upcoming Run"))
+    next_dist = float(next_ev.get("target_distance_km", 0.0))
+    shift_date_str = today_date.strftime("%Y-%m-%d")
+
+    # 1. If LLM is configured, ask for dynamic reasoning & options
+    if GEMINI_API_KEY or OPENAI_API_KEY:
+        prompt = (
+            "You are an elite exercise physiologist and half-marathon coach. An athlete missed a scheduled workout.\n"
+            f"- Missed: '{missed_title}' ({missed_dist} km) on {missed_ev.get('date')}\n"
+            f"- Next Scheduled: '{next_title}' ({next_dist} km)\n"
+            f"- Athlete Current Load: {current_tl} TL, LTHR: {athlete_lthr} bpm\n"
+            f"- Current Date: {today_date.strftime('%Y-%m-%d (%A)')}\n\n"
+            "Analyze whether the athlete should drop this workout, swap it, or shift it without causing injury or compromising the upcoming key session.\n"
+            "Output ONLY valid JSON matching this schema:\n"
+            "{\n"
+            '  "coach_rationale": "2-sentence physiological explanation of trade-offs",\n'
+            '  "options": [\n'
+            '    {\n'
+            '      "label": "Short Action Title (max 28 chars)",\n'
+            '      "sublabel": "Brief reason (max 45 chars)",\n'
+            '      "action": "DROP" or "SHIFT",\n'
+            f'      "target_date": "{shift_date_str}" or "",\n'
+            '      "is_recommended": true or false\n'
+            '    }\n'
+            "  ]\n"
+            "}"
+        )
+        try:
+            if GEMINI_API_KEY:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+                body = {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3},
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(body).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    raw_text = resp_data["candidates"][0]["content"]["parts"][0]["text"]
+                    parsed = json.loads(raw_text)
+            else:
+                url = "https://api.openai.com/v1/chat/completions"
+                body = {
+                    "model": OPENAI_MODEL,
+                    "response_format": {"type": "json_object"},
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(body).encode("utf-8"),
+                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    raw_text = resp_data["choices"][0]["message"]["content"]
+                    parsed = json.loads(raw_text)
+
+            if isinstance(parsed, dict) and parsed.get("coach_rationale") and isinstance(parsed.get("options"), list):
+                return parsed
+        except Exception as e:
+            print(f"[WARN] LLM missed workout coaching failed (using built-in physiological analyzer): {e}")
+
+    # 2. Built-in physiological rule engine
+    is_next_long_run = next_dist >= 14.0 or "long" in next_title.lower()
+    is_missed_quality = "threshold" in missed_title.lower() or "interval" in missed_title.lower() or "2x" in missed_title.lower()
+
+    if is_next_long_run:
+        rationale = (
+            f"You missed '{missed_title}' ({missed_dist:.0f}K). "
+            f"With your key '{next_title}' ({next_dist:.0f}K) ahead, trying to cram missed mileage beforehand "
+            "sharply elevates mechanical fatigue and glycogen depletion."
+        )
+        options = [
+            {
+                "label": "Drop & Protect Long Run",
+                "sublabel": f"Safeguards leg turnover for your {next_dist:.0f}K session",
+                "action": "DROP",
+                "target_date": "",
+                "is_recommended": True,
+            },
+            {
+                "label": f"Shift to Light Shakeout ({min(4.0, missed_dist):.0f}K)",
+                "sublabel": "Cap at 25m in Zone 1 (<140 bpm). Omit all strides",
+                "action": "SHIFT",
+                "target_date": shift_date_str,
+                "is_recommended": False,
+            },
+        ]
+    elif is_missed_quality:
+        rationale = (
+            f"You missed your threshold stimulus '{missed_title}' ({missed_dist:.0f}K). "
+            "Lactate clearance adaptation is vital for half-marathon pace sustainability."
+        )
+        options = [
+            {
+                "label": f"Swap to Today ({shift_date_str})",
+                "sublabel": "Execute threshold work today; bump tomorrow to recovery",
+                "action": "SHIFT",
+                "target_date": shift_date_str,
+                "is_recommended": True,
+            },
+            {
+                "label": "Drop & Move On",
+                "sublabel": "Maintain schedule rather than stacking quality days back-to-back",
+                "action": "DROP",
+                "target_date": "",
+                "is_recommended": False,
+            },
+        ]
+    else:
+        rationale = (
+            f"You missed an aerobic base run '{missed_title}' ({missed_dist:.0f}K). "
+            "Aerobic volume loss can be absorbed safely without disrupting your training block."
+        )
+        options = [
+            {
+                "label": "Drop & Move On",
+                "sublabel": "Never chase missed aerobic miles; keep recovery intact",
+                "action": "DROP",
+                "target_date": "",
+                "is_recommended": True,
+            },
+            {
+                "label": f"Shift to Today ({shift_date_str})",
+                "sublabel": f"Log {missed_dist:.0f}K today strictly in Zone 2",
+                "action": "SHIFT",
+                "target_date": shift_date_str,
+                "is_recommended": False,
+            },
+        ]
+
+    return {
+        "coach_rationale": rationale,
+        "options": options,
+    }
+
+
 def clean_workout_title(raw_title: str) -> str:
     """Strip emoji checkmarks and week prefixes for crisp widget typography."""
     cleaned = re.sub(r"^[✅🏃‍♂️🔥⚡]+\s*", "", raw_title).strip()
@@ -219,7 +375,7 @@ def build_widget_payload() -> Dict[str, Any]:
     # 2. Fetch Google Calendar planned workouts (from Monday of current week to +10 days)
     planned_by_date: Dict[str, Dict[str, Any]] = {}
     upcoming_workouts: List[Dict[str, Any]] = []
-    missed_workout_payload: Optional[Dict[str, Any]] = None
+    detected_missed_ev: Optional[Dict[str, Any]] = None
     try:
         gcal = GCalClient(credentials_path=GCAL_CREDENTIALS_PATH, token_path=GCAL_TOKEN_PATH)
         start_dt = datetime.combine(monday, datetime.min.time()).replace(tzinfo=timezone.utc) - timedelta(days=1)
@@ -248,21 +404,7 @@ def build_widget_payload() -> Dict[str, Any]:
                 if not has_run_past and not is_skipped and not ev.get("completed"):
                     dist_km = float(ev.get("target_distance_km", 0.0))
                     if dist_km > 0:
-                        clean_name = clean_workout_title(ev.get("title", "Run"))
-                        missed_workout_payload = {
-                            "event_id": str(ev.get("event_id", "")),
-                            "title": clean_name,
-                            "date": ev_date_str,
-                            "target_distance_km": dist_km,
-                            "workout_type": ev.get("workout_type", "Run"),
-                            "can_shift_to": today.strftime("%Y-%m-%d"),
-                            "can_shift_to_label": f"Today ({today.strftime('%a, %d %b')})",
-                            "coach_advice": (
-                                f"You missed '{clean_name}' ({dist_km:.0f}K). "
-                                "Coach recommendation: Drop it to protect your upcoming Long Run, "
-                                "or shift to a short recovery jog."
-                            ),
-                        }
+                        detected_missed_ev = ev
     except Exception as e:
         print(f"[WARN] Google Calendar fetch error: {e}")
 
@@ -416,6 +558,27 @@ def build_widget_payload() -> Dict[str, Any]:
             "target_pace": "5:50–6:10 /km",
             "target_hr_zone": "Zone 2 (138–155 bpm)",
             "watch_synced": True,
+        }
+
+    # 5b. Dynamic AI Missed Workout Coaching & Calendar Options
+    missed_workout_payload = None
+    if detected_missed_ev:
+        lthr_val = int(profile.get("lthr") or 172)
+        ai_missed = generate_missed_workout_coaching(
+            missed_ev=detected_missed_ev,
+            next_ev=next_workout_payload,
+            athlete_lthr=lthr_val,
+            current_tl=display_tl,
+            today_date=today,
+        )
+        missed_workout_payload = {
+            "event_id": str(detected_missed_ev.get("event_id", "")),
+            "title": clean_workout_title(detected_missed_ev.get("title", "Run")),
+            "date": detected_missed_ev.get("date", ""),
+            "target_distance_km": float(detected_missed_ev.get("target_distance_km", 0.0)),
+            "workout_type": detected_missed_ev.get("workout_type", "Run"),
+            "coach_advice": ai_missed.get("coach_rationale", ""),
+            "options": ai_missed.get("options", []),
         }
 
     # 6. Build Tile 4: Zone 2 vs Speed Spectrum (80/20 Polarization)

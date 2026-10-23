@@ -119,15 +119,22 @@ data class RunSplitItem(
     val strideCm: Int
 )
 
+data class MissedWorkoutOption(
+    val label: String = "Drop & Move On",
+    val sublabel: String = "",
+    val action: String = "DROP",
+    val targetDate: String = "",
+    val isRecommended: Boolean = false
+)
+
 data class MissedWorkoutData(
     val eventId: String = "",
     val title: String = "",
     val date: String = "",
     val targetDistanceKm: Double = 0.0,
     val workoutType: String = "Run",
-    val canShiftTo: String = "",
-    val canShiftToLabel: String = "",
-    val coachAdvice: String = ""
+    val coachAdvice: String = "",
+    val options: List<MissedWorkoutOption> = emptyList()
 )
 
 data class LastRunData(

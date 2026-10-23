@@ -1120,32 +1120,103 @@ private fun MissedWorkoutCoachCard(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                FilledTonalButton(
-                    onClick = { onResolve("DROP", "") },
-                    enabled = !isResolving,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp)
+            if (missed.options.isNotEmpty()) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = if (isResolving) "Updating..." else "Drop & Move On",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    missed.options.forEach { opt ->
+                        if (opt.isRecommended) {
+                            Button(
+                                onClick = { onResolve(opt.action, opt.targetDate) },
+                                enabled = !isResolving,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalAlignment = Alignment.Start
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = opt.label,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.22f)
+                                        ) {
+                                            Text(
+                                                text = "AI RECOMMENDED",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                fontSize = 9.sp
+                                            )
+                                        }
+                                    }
+                                    if (opt.sublabel.isNotBlank()) {
+                                        Text(
+                                            text = opt.sublabel,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { onResolve(opt.action, opt.targetDate) },
+                                enabled = !isResolving,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalAlignment = Alignment.Start
+                                ) {
+                                    Text(
+                                        text = opt.label,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    if (opt.sublabel.isNotBlank()) {
+                                        Text(
+                                            text = opt.sublabel,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-
-                if (missed.canShiftTo.isNotBlank()) {
-                    OutlinedButton(
-                        onClick = { onResolve("SHIFT", missed.canShiftTo) },
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    FilledTonalButton(
+                        onClick = { onResolve("DROP", "") },
                         enabled = !isResolving,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Text(
-                            text = "Shift to ${missed.canShiftToLabel}",
+                            text = if (isResolving) "Updating..." else "Drop & Move On",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold
                         )

@@ -365,15 +365,30 @@ object WidgetRepository {
 
         val missedObj = root.optJSONObject("missed_workout")
         val missedWorkout = if (missedObj != null) {
+            val optArr = missedObj.optJSONArray("options")
+            val optList = mutableListOf<MissedWorkoutOption>()
+            if (optArr != null) {
+                for (i in 0 until optArr.length()) {
+                    val o = optArr.getJSONObject(i)
+                    optList.add(
+                        MissedWorkoutOption(
+                            label = o.optString("label", "Drop & Move On"),
+                            sublabel = o.optString("sublabel", ""),
+                            action = o.optString("action", "DROP"),
+                            targetDate = o.optString("target_date", ""),
+                            isRecommended = o.optBoolean("is_recommended", false)
+                        )
+                    )
+                }
+            }
             MissedWorkoutData(
                 eventId = missedObj.optString("event_id", ""),
                 title = missedObj.optString("title", ""),
                 date = missedObj.optString("date", ""),
                 targetDistanceKm = missedObj.optDouble("target_distance_km", 0.0),
                 workoutType = missedObj.optString("workout_type", "Run"),
-                canShiftTo = missedObj.optString("can_shift_to", ""),
-                canShiftToLabel = missedObj.optString("can_shift_to_label", "Today"),
-                coachAdvice = missedObj.optString("coach_advice", "")
+                coachAdvice = missedObj.optString("coach_advice", ""),
+                options = optList
             )
         } else null
 
