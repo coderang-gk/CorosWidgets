@@ -2,11 +2,15 @@ package com.gaurang.coroswidgets
 
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -44,11 +48,16 @@ import com.gaurang.coroswidgets.data.CorosWidgetPayload
 import com.gaurang.coroswidgets.data.ExpressiveTileType
 import com.gaurang.coroswidgets.data.LastRunData
 import com.gaurang.coroswidgets.data.WidgetRepository
+import com.gaurang.coroswidgets.notifications.CorosNotificationHelper
 import com.gaurang.coroswidgets.ui.ExpressiveWidgetRenderer
 import com.gaurang.coroswidgets.widgets.*
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        const val EXTRA_OPEN_RUN_DETAIL = "EXTRA_OPEN_RUN_DETAIL"
+    }
 
     data class WidgetCatalogItem(
         val styleIndex: Int,
@@ -77,6 +86,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        CorosNotificationHelper.createNotificationChannel(this)
+
+        val shouldOpenRunDetailFromIntent = intent?.getBooleanExtra(EXTRA_OPEN_RUN_DETAIL, false) ?: false
 
         setContent {
             val context = LocalContext.current
@@ -88,7 +100,19 @@ class MainActivity : ComponentActivity() {
             var selectedSection by remember { mutableIntStateOf(0) } // 0 = Training Hub, 1 = Widgets
             var selectedFilter by remember { mutableIntStateOf(0) } // 0 = All, 1 = Sculptural, 2 = Cards
             var showServerDialog by remember { mutableStateOf(false) }
-            var selectedRunForDetail by remember { mutableStateOf<LastRunData?>(null) }
+            var selectedRunForDetail by remember {
+                mutableStateOf(if (shouldOpenRunDetailFromIntent) payload.lastRun else null)
+            }
+
+            // Notification permission launcher for Android 13+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val permissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) {}
+                LaunchedEffect(Unit) {
+                    permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
 
             LaunchedEffect(Unit) {
                 isSyncing = true

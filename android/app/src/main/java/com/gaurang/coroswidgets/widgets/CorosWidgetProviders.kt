@@ -13,6 +13,7 @@ import com.gaurang.coroswidgets.R
 import com.gaurang.coroswidgets.data.CorosWidgetPayload
 import com.gaurang.coroswidgets.data.ExpressiveTileType
 import com.gaurang.coroswidgets.data.WidgetRepository
+import com.gaurang.coroswidgets.notifications.CorosNotificationHelper
 import com.gaurang.coroswidgets.ui.ExpressiveWidgetRenderer
 import java.util.concurrent.Executors
 
@@ -38,6 +39,7 @@ object CorosWidgetUpdateHelper {
             val result = WidgetRepository.fetchAndCachePayload(appCtx, forceRefresh = forceServerRefresh)
             val payload = result.getOrElse { WidgetRepository.getCachedPayload(appCtx) }
             renderAllWithPayload(appCtx, payload)
+            CorosNotificationHelper.maybeNotifyNewRun(appCtx, payload.lastRun)
             onComplete?.invoke(result)
         }
     }
