@@ -6,12 +6,25 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.BackEventCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -58,6 +72,9 @@ import com.gaurang.coroswidgets.ui.ExpressiveTheme
 import com.gaurang.coroswidgets.ui.ExpressiveWidgetRenderer
 import com.gaurang.coroswidgets.widgets.*
 import java.util.Locale
+import java.util.concurrent.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 
 enum class AppScreen {
     MAIN,
@@ -115,12 +132,65 @@ class MainActivity : ComponentActivity() {
                 mutableStateOf(if (shouldOpenRunDetailFromIntent) payload.lastRun else null)
             }
             var currentScreen by remember { mutableStateOf(AppScreen.MAIN) }
+            var initialPlanHubTab by remember { mutableIntStateOf(0) }
             var showWorkoutDetail by remember { mutableStateOf(false) }
 
             val coroutineScope = rememberCoroutineScope()
 
-            BackHandler(enabled = currentScreen != AppScreen.MAIN) {
-                currentScreen = AppScreen.MAIN
+            val navAnimProgress = remember { Animatable(0f) }
+            var isPredictiveBackActive by remember { mutableStateOf(false) }
+            var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
+            var predictiveSwipeEdge by remember { mutableIntStateOf(BackEventCompat.EDGE_LEFT) }
+
+            fun navigateToPlanHub(tab: Int) {
+                initialPlanHubTab = tab
+                currentScreen = AppScreen.PLAN_RACE_HUB
+                coroutineScope.launch {
+                    navAnimProgress.snapTo(0f)
+                    navAnimProgress.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                    )
+                }
+            }
+
+            fun navigateBackToMain() {
+                coroutineScope.launch {
+                    navAnimProgress.animateTo(
+                        targetValue = 0f,
+                        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+                    )
+                    currentScreen = AppScreen.MAIN
+                }
+            }
+
+            PredictiveBackHandler(enabled = currentScreen == AppScreen.PLAN_RACE_HUB) { progress: Flow<BackEventCompat> ->
+                try {
+                    isPredictiveBackActive = true
+                    progress.collect { backEvent ->
+                        predictiveBackProgress = backEvent.progress
+                        predictiveSwipeEdge = backEvent.swipeEdge
+                    }
+                    // User finished the gesture
+                    navAnimProgress.snapTo(1f - predictiveBackProgress)
+                    isPredictiveBackActive = false
+                    navAnimProgress.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)
+                    )
+                    currentScreen = AppScreen.MAIN
+                } catch (e: CancellationException) {
+                    // Gesture cancelled by user
+                    navAnimProgress.snapTo(1f - predictiveBackProgress)
+                    isPredictiveBackActive = false
+                    navAnimProgress.animateTo(
+                        targetValue = 1f,
+                        animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)
+                    )
+                } finally {
+                    isPredictiveBackActive = false
+                    predictiveBackProgress = 0f
+                }
             }
 
             // Notification permission launcher for Android 13+
@@ -144,66 +214,115 @@ class MainActivity : ComponentActivity() {
             }
 
             MaterialTheme(colorScheme = colorScheme) {
-                when (currentScreen) {
-                    AppScreen.MAIN -> {
-                        MainAppScaffold(
-                            payload = payload,
-                            isSyncing = isSyncing,
-                            selectedSection = selectedSection,
-                            onSectionSelected = { selectedSection = it },
-                            selectedFilter = selectedFilter,
-                            onFilterSelected = { selectedFilter = it },
-                            catalog = catalog,
-                            onRunClicked = { run -> selectedRunForDetail = run },
-                            onWorkoutClicked = { showWorkoutDetail = true },
-                            onRaceClicked = { currentScreen = AppScreen.PLAN_RACE_HUB },
-                            onCalendarClicked = { currentScreen = AppScreen.PLAN_RACE_HUB },
-                            onResolveMissedWorkout = { action, targetDate ->
-                                val missed = payload.missedWorkout ?: return@MainAppScaffold
-                                isResolvingMissed = true
-                                Thread {
-                                    val res = WidgetRepository.resolveMissedWorkout(context, missed.eventId, action, targetDate)
-                                    runOnUiThread {
-                                        isResolvingMissed = false
-                                        res.onSuccess { fresh ->
-                                            payload = fresh
-                                            CorosWidgetUpdateHelper.renderAllFromCache(context)
-                                            val msg = if (action == "SHIFT") "Shifted to $targetDate in Google Calendar" else "Workout marked [SKIPPED] in Google Calendar"
-                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                        }.onFailure { err ->
-                                            Toast.makeText(context, "Failed: ${err.message}", Toast.LENGTH_SHORT).show()
+                val displayProgress = if (isPredictiveBackActive) {
+                    (1f - predictiveBackProgress).coerceIn(0f, 1f)
+                } else {
+                    navAnimProgress.value
+                }
+
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val screenWidthPx = constraints.maxWidth.toFloat()
+
+                    // Render MainAppScaffold if we are on MAIN or transitioning/peeking
+                    if (currentScreen == AppScreen.MAIN || displayProgress < 0.999f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    val progressToMain = 1f - displayProgress
+                                    val scale = 0.93f + (0.07f * progressToMain)
+                                    scaleX = scale
+                                    scaleY = scale
+                                    translationX = -screenWidthPx * 0.15f * (1f - progressToMain)
+                                    alpha = 0.65f + (0.35f * progressToMain)
+                                }
+                        ) {
+                            MainAppScaffold(
+                                payload = payload,
+                                isSyncing = isSyncing,
+                                selectedSection = selectedSection,
+                                onSectionSelected = { selectedSection = it },
+                                selectedFilter = selectedFilter,
+                                onFilterSelected = { selectedFilter = it },
+                                catalog = catalog,
+                                onRunClicked = { run -> selectedRunForDetail = run },
+                                onWorkoutClicked = { showWorkoutDetail = true },
+                                onRaceClicked = { navigateToPlanHub(1) },
+                                onCalendarClicked = { navigateToPlanHub(0) },
+                                onResolveMissedWorkout = { action, targetDate ->
+                                    val missed = payload.missedWorkout ?: return@MainAppScaffold
+                                    isResolvingMissed = true
+                                    Thread {
+                                        val res = WidgetRepository.resolveMissedWorkout(context, missed.eventId, action, targetDate)
+                                        runOnUiThread {
+                                            isResolvingMissed = false
+                                            res.onSuccess { fresh ->
+                                                payload = fresh
+                                                CorosWidgetUpdateHelper.renderAllFromCache(context)
+                                                val msg = if (action == "SHIFT") "Shifted to $targetDate in Google Calendar" else "Workout marked [SKIPPED] in Google Calendar"
+                                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                            }.onFailure { err ->
+                                                Toast.makeText(context, "Failed: ${err.message}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }.start()
+                                },
+                                isResolvingMissed = isResolvingMissed,
+                                onSyncClicked = {
+                                    isSyncing = true
+                                    CorosWidgetUpdateHelper.refreshAllWidgetsAsync(context, forceServerRefresh = true) { res ->
+                                        runOnUiThread {
+                                            payload = WidgetRepository.getCachedPayload(context)
+                                            isSyncing = false
+                                            res.onSuccess {
+                                                Toast.makeText(context, "Synced with COROS & Google Calendar", Toast.LENGTH_SHORT).show()
+                                            }.onFailure {
+                                                Toast.makeText(context, "Using cached data", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
                                     }
-                                }.start()
-                            },
-                            isResolvingMissed = isResolvingMissed,
-                            onSyncClicked = {
-                                isSyncing = true
-                                CorosWidgetUpdateHelper.refreshAllWidgetsAsync(context, forceServerRefresh = true) { res ->
-                                    runOnUiThread {
-                                        payload = WidgetRepository.getCachedPayload(context)
-                                        isSyncing = false
-                                        res.onSuccess {
-                                            Toast.makeText(context, "Synced with COROS & Google Calendar", Toast.LENGTH_SHORT).show()
-                                        }.onFailure {
-                                            Toast.makeText(context, "Using cached data", Toast.LENGTH_SHORT).show()
-                                        }
+                                },
+                                onSettingsClicked = { showServerDialog = true },
+                                onPinWidget = { item ->
+                                    WidgetRepository.setStyleForTile(context, item.slot, item.styleIndex)
+                                    CorosWidgetUpdateHelper.renderAllFromCache(context)
+                                    pinWidgetToLauncher(item)
+                                }
+                            )
+                        }
+                    }
+
+                    // Render PlanRaceHubScreen if we are on PLAN_RACE_HUB or transitioning/peeking
+                    if (currentScreen == AppScreen.PLAN_RACE_HUB || displayProgress > 0.001f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    if (isPredictiveBackActive) {
+                                        val p = predictiveBackProgress
+                                        val scale = 1f - (p * 0.08f)
+                                        scaleX = scale
+                                        scaleY = scale
+                                        val direction = if (predictiveSwipeEdge == BackEventCompat.EDGE_LEFT) 1f else -1f
+                                        translationX = direction * (p * screenWidthPx * 0.85f)
+                                        clip = true
+                                        shape = RoundedCornerShape((p * 28).dp)
+                                        shadowElevation = (p * 24).dp.toPx()
+                                    } else {
+                                        translationX = (1f - displayProgress) * screenWidthPx
+                                        val scale = 0.96f + (0.04f * displayProgress)
+                                        scaleX = scale
+                                        scaleY = scale
+                                        alpha = displayProgress.coerceIn(0f, 1f)
                                     }
                                 }
-                            },
-                            onSettingsClicked = { showServerDialog = true },
-                            onPinWidget = { item ->
-                                WidgetRepository.setStyleForTile(context, item.slot, item.styleIndex)
-                                CorosWidgetUpdateHelper.renderAllFromCache(context)
-                                pinWidgetToLauncher(item)
-                            }
-                        )
-                    }
-                    AppScreen.PLAN_RACE_HUB -> {
-                        PlanRaceHubScreen(
-                            payload = payload,
-                            onNavigateBack = { currentScreen = AppScreen.MAIN }
-                        )
+                        ) {
+                            PlanRaceHubScreen(
+                                payload = payload,
+                                initialTab = initialPlanHubTab,
+                                onNavigateBack = { navigateBackToMain() }
+                            )
+                        }
                     }
                 }
 
@@ -214,7 +333,7 @@ class MainActivity : ComponentActivity() {
                         onDismiss = { showWorkoutDetail = false },
                         onViewFullPlan = {
                             showWorkoutDetail = false
-                            currentScreen = AppScreen.PLAN_RACE_HUB
+                            navigateToPlanHub(0)
                         }
                     )
                 }
@@ -2167,6 +2286,7 @@ private fun NextWorkoutDetailModalBottomSheet(
 @Composable
 private fun PlanRaceHubScreen(
     payload: CorosWidgetPayload,
+    initialTab: Int = 0,
     onNavigateBack: () -> Unit
 ) {
     val rc = payload.raceCountdown
@@ -2174,7 +2294,7 @@ private fun PlanRaceHubScreen(
     val athlete = payload.athlete
     val totalWeeks = if (rc.totalWeeks > 0) rc.totalWeeks else 10
     val currentWeek = if (rc.currentWeek > 0) rc.currentWeek.coerceIn(1, totalWeeks) else 1
-    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Schedule, 1 = Race Strategy
+    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
     val expandedWeeks = remember { mutableStateMapOf<Int, Boolean>().apply { put(currentWeek, true) } }
 
     Scaffold(
@@ -2232,7 +2352,37 @@ private fun PlanRaceHubScreen(
                 )
             }
 
-            when (selectedTab) {
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    if (targetState > initialState) {
+                        (slideInHorizontally(
+                            initialOffsetX = { it / 3 },
+                            animationSpec = tween(280, easing = FastOutSlowInEasing)
+                        ) + fadeIn(animationSpec = tween(280)))
+                            .togetherWith(
+                                slideOutHorizontally(
+                                    targetOffsetX = { -it / 3 },
+                                    animationSpec = tween(280, easing = FastOutSlowInEasing)
+                                ) + fadeOut(animationSpec = tween(200))
+                            )
+                    } else {
+                        (slideInHorizontally(
+                            initialOffsetX = { -it / 3 },
+                            animationSpec = tween(280, easing = FastOutSlowInEasing)
+                        ) + fadeIn(animationSpec = tween(280)))
+                            .togetherWith(
+                                slideOutHorizontally(
+                                    targetOffsetX = { it / 3 },
+                                    animationSpec = tween(280, easing = FastOutSlowInEasing)
+                                ) + fadeOut(animationSpec = tween(200))
+                            )
+                    }
+                },
+                label = "PlanHubTabTransition",
+                modifier = Modifier.fillMaxSize()
+            ) { tab ->
+                when (tab) {
                 0 -> {
                     // Schedule Tab
                     LazyColumn(
@@ -2720,6 +2870,7 @@ private fun PlanRaceHubScreen(
             }
         }
     }
+}
 }
 
 @Composable
