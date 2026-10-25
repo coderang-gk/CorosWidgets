@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -49,12 +50,19 @@ import com.gaurang.coroswidgets.data.CorosWidgetPayload
 import com.gaurang.coroswidgets.data.ExpressiveTileType
 import com.gaurang.coroswidgets.data.LastRunData
 import com.gaurang.coroswidgets.data.MissedWorkoutData
+import com.gaurang.coroswidgets.data.NextWorkoutData
+import com.gaurang.coroswidgets.data.RaceCountdownData
 import com.gaurang.coroswidgets.data.WidgetRepository
 import com.gaurang.coroswidgets.notifications.CorosNotificationHelper
 import com.gaurang.coroswidgets.ui.ExpressiveTheme
 import com.gaurang.coroswidgets.ui.ExpressiveWidgetRenderer
 import com.gaurang.coroswidgets.widgets.*
 import java.util.Locale
+
+enum class AppScreen {
+    MAIN,
+    PLAN_RACE_HUB
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -106,8 +114,14 @@ class MainActivity : ComponentActivity() {
             var selectedRunForDetail by remember {
                 mutableStateOf(if (shouldOpenRunDetailFromIntent) payload.lastRun else null)
             }
+            var currentScreen by remember { mutableStateOf(AppScreen.MAIN) }
+            var showWorkoutDetail by remember { mutableStateOf(false) }
 
             val coroutineScope = rememberCoroutineScope()
+
+            BackHandler(enabled = currentScreen != AppScreen.MAIN) {
+                currentScreen = AppScreen.MAIN
+            }
 
             // Notification permission launcher for Android 13+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -130,55 +144,80 @@ class MainActivity : ComponentActivity() {
             }
 
             MaterialTheme(colorScheme = colorScheme) {
-                MainAppScaffold(
-                    payload = payload,
-                    isSyncing = isSyncing,
-                    selectedSection = selectedSection,
-                    onSectionSelected = { selectedSection = it },
-                    selectedFilter = selectedFilter,
-                    onFilterSelected = { selectedFilter = it },
-                    catalog = catalog,
-                    onRunClicked = { run -> selectedRunForDetail = run },
-                    onResolveMissedWorkout = { action, targetDate ->
-                        val missed = payload.missedWorkout ?: return@MainAppScaffold
-                        isResolvingMissed = true
-                        Thread {
-                            val res = WidgetRepository.resolveMissedWorkout(context, missed.eventId, action, targetDate)
-                            runOnUiThread {
-                                isResolvingMissed = false
-                                res.onSuccess { fresh ->
-                                    payload = fresh
-                                    CorosWidgetUpdateHelper.renderAllFromCache(context)
-                                    val msg = if (action == "SHIFT") "Shifted to $targetDate in Google Calendar" else "Workout marked [SKIPPED] in Google Calendar"
-                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                }.onFailure { err ->
-                                    Toast.makeText(context, "Failed: ${err.message}", Toast.LENGTH_SHORT).show()
+                when (currentScreen) {
+                    AppScreen.MAIN -> {
+                        MainAppScaffold(
+                            payload = payload,
+                            isSyncing = isSyncing,
+                            selectedSection = selectedSection,
+                            onSectionSelected = { selectedSection = it },
+                            selectedFilter = selectedFilter,
+                            onFilterSelected = { selectedFilter = it },
+                            catalog = catalog,
+                            onRunClicked = { run -> selectedRunForDetail = run },
+                            onWorkoutClicked = { showWorkoutDetail = true },
+                            onRaceClicked = { currentScreen = AppScreen.PLAN_RACE_HUB },
+                            onCalendarClicked = { currentScreen = AppScreen.PLAN_RACE_HUB },
+                            onResolveMissedWorkout = { action, targetDate ->
+                                val missed = payload.missedWorkout ?: return@MainAppScaffold
+                                isResolvingMissed = true
+                                Thread {
+                                    val res = WidgetRepository.resolveMissedWorkout(context, missed.eventId, action, targetDate)
+                                    runOnUiThread {
+                                        isResolvingMissed = false
+                                        res.onSuccess { fresh ->
+                                            payload = fresh
+                                            CorosWidgetUpdateHelper.renderAllFromCache(context)
+                                            val msg = if (action == "SHIFT") "Shifted to $targetDate in Google Calendar" else "Workout marked [SKIPPED] in Google Calendar"
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                        }.onFailure { err ->
+                                            Toast.makeText(context, "Failed: ${err.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }.start()
+                            },
+                            isResolvingMissed = isResolvingMissed,
+                            onSyncClicked = {
+                                isSyncing = true
+                                CorosWidgetUpdateHelper.refreshAllWidgetsAsync(context, forceServerRefresh = true) { res ->
+                                    runOnUiThread {
+                                        payload = WidgetRepository.getCachedPayload(context)
+                                        isSyncing = false
+                                        res.onSuccess {
+                                            Toast.makeText(context, "Synced with COROS & Google Calendar", Toast.LENGTH_SHORT).show()
+                                        }.onFailure {
+                                            Toast.makeText(context, "Using cached data", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
                                 }
+                            },
+                            onSettingsClicked = { showServerDialog = true },
+                            onPinWidget = { item ->
+                                WidgetRepository.setStyleForTile(context, item.slot, item.styleIndex)
+                                CorosWidgetUpdateHelper.renderAllFromCache(context)
+                                pinWidgetToLauncher(item)
                             }
-                        }.start()
-                    },
-                    isResolvingMissed = isResolvingMissed,
-                    onSyncClicked = {
-                        isSyncing = true
-                        CorosWidgetUpdateHelper.refreshAllWidgetsAsync(context, forceServerRefresh = true) { res ->
-                            runOnUiThread {
-                                payload = WidgetRepository.getCachedPayload(context)
-                                isSyncing = false
-                                res.onSuccess {
-                                    Toast.makeText(context, "Synced with COROS & Google Calendar", Toast.LENGTH_SHORT).show()
-                                }.onFailure {
-                                    Toast.makeText(context, "Using cached data", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    },
-                    onSettingsClicked = { showServerDialog = true },
-                    onPinWidget = { item ->
-                        WidgetRepository.setStyleForTile(context, item.slot, item.styleIndex)
-                        CorosWidgetUpdateHelper.renderAllFromCache(context)
-                        pinWidgetToLauncher(item)
+                        )
                     }
-                )
+                    AppScreen.PLAN_RACE_HUB -> {
+                        PlanRaceHubScreen(
+                            payload = payload,
+                            onNavigateBack = { currentScreen = AppScreen.MAIN }
+                        )
+                    }
+                }
+
+                if (showWorkoutDetail) {
+                    NextWorkoutDetailModalBottomSheet(
+                        workout = payload.nextWorkout,
+                        raceCountdown = payload.raceCountdown,
+                        onDismiss = { showWorkoutDetail = false },
+                        onViewFullPlan = {
+                            showWorkoutDetail = false
+                            currentScreen = AppScreen.PLAN_RACE_HUB
+                        }
+                    )
+                }
 
                 selectedRunForDetail?.let { run ->
                     RunDetailModalBottomSheet(
@@ -241,6 +280,9 @@ private fun MainAppScaffold(
     onFilterSelected: (Int) -> Unit,
     catalog: List<MainActivity.WidgetCatalogItem>,
     onRunClicked: (LastRunData) -> Unit,
+    onWorkoutClicked: () -> Unit = {},
+    onRaceClicked: () -> Unit = {},
+    onCalendarClicked: () -> Unit = onRaceClicked,
     onResolveMissedWorkout: (String, String) -> Unit = { _, _ -> },
     isResolvingMissed: Boolean = false,
     onSyncClicked: () -> Unit,
@@ -265,6 +307,15 @@ private fun MainAppScaffold(
                     )
                 },
                 actions = {
+                    FilledTonalIconButton(
+                        onClick = onCalendarClicked,
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = rememberPlanVector(),
+                            contentDescription = "Plan & Race Hub"
+                        )
+                    }
                     FilledTonalIconButton(
                         onClick = onSyncClicked,
                         modifier = Modifier.padding(end = 4.dp)
@@ -336,6 +387,8 @@ private fun MainAppScaffold(
                 isSyncing = isSyncing,
                 contentPadding = innerPadding,
                 onRunClicked = onRunClicked,
+                onWorkoutClicked = onWorkoutClicked,
+                onRaceClicked = onRaceClicked,
                 onResolveMissedWorkout = onResolveMissedWorkout,
                 isResolvingMissed = isResolvingMissed
             )
@@ -358,6 +411,8 @@ private fun TrainingHubSection(
     isSyncing: Boolean,
     contentPadding: PaddingValues,
     onRunClicked: (LastRunData) -> Unit,
+    onWorkoutClicked: () -> Unit = {},
+    onRaceClicked: () -> Unit = {},
     onResolveMissedWorkout: (String, String) -> Unit = { _, _ -> },
     isResolvingMissed: Boolean = false
 ) {
@@ -384,7 +439,12 @@ private fun TrainingHubSection(
 
         // 1. Athlete Overview & Next Workout Card
         item {
-            AthleteSummaryHeroCard(payload = payload, isSyncing = isSyncing)
+            AthleteSummaryHeroCard(
+                payload = payload,
+                isSyncing = isSyncing,
+                onWorkoutClicked = onWorkoutClicked,
+                onRaceClicked = onRaceClicked
+            )
         }
 
         // 2. Weekly Mileage Bar & 7-Day M-S Schedule Card
@@ -1228,7 +1288,12 @@ private fun MissedWorkoutCoachCard(
 }
 
 @Composable
-private fun AthleteSummaryHeroCard(payload: CorosWidgetPayload, isSyncing: Boolean) {
+private fun AthleteSummaryHeroCard(
+    payload: CorosWidgetPayload,
+    isSyncing: Boolean,
+    onWorkoutClicked: (() -> Unit)? = null,
+    onRaceClicked: (() -> Unit)? = null
+) {
     val wm = payload.weeklyMileage
     val tl = payload.trainingLoad
     val rc = payload.raceCountdown
@@ -1272,10 +1337,13 @@ private fun AthleteSummaryHeroCard(payload: CorosWidgetPayload, isSyncing: Boole
 
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable(enabled = onRaceClicked != null) { onRaceClicked?.invoke() }
                 ) {
                     Text(
-                        text = "Pune HM · ${rc.daysLeft}d",
+                        text = "${rc.raceName.ifBlank { "Pune HM" }} · ${rc.daysLeft}d",
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1322,9 +1390,12 @@ private fun AthleteSummaryHeroCard(payload: CorosWidgetPayload, isSyncing: Boole
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Next Workout Strip
+            // Next Workout Strip (Clickable -> Opens Detailed Workout Inspection)
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable(enabled = onWorkoutClicked != null) { onWorkoutClicked?.invoke() },
                 shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh
             ) {
@@ -1355,16 +1426,73 @@ private fun AthleteSummaryHeroCard(payload: CorosWidgetPayload, isSyncing: Boole
                     }
 
                     Surface(
-                        shape = CircleShape,
+                        shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest
                     ) {
                         Text(
-                            text = "Watch ✓",
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            text = if (nw.targetDistanceKm > 0) "${nw.targetDistanceKm.toInt()} km" else "Planned",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Bold
                         )
+                    }
+                }
+            }
+
+            // Target Race Strip (Clickable -> Opens Full Plan & Race Hub)
+            if (rc.daysLeft > 0) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable(enabled = onRaceClicked != null) { onRaceClicked?.invoke() },
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "TARGET RACE · ${rc.daysLeft} DAYS AWAY",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = rc.raceName.ifBlank { "HALF MARATHON" },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Week ${rc.currentWeek} of ${rc.totalWeeks} · ${rc.phase}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Text(
+                                text = "${rc.daysLeft}d",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -1754,6 +1882,870 @@ private fun rememberTuneVector(): ImageVector = remember {
             verticalLineTo(3.0f)
             horizontalLineTo(15.0f)
             verticalLineTo(9.0f)
+            close()
+        }
+    }.build()
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NextWorkoutDetailModalBottomSheet(
+    workout: NextWorkoutData,
+    raceCountdown: RaceCountdownData,
+    onDismiss: () -> Unit,
+    onViewFullPlan: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 36.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "NEXT SCHEDULED WORKOUT · ${workout.dayBadge.uppercase(Locale.US)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = workout.title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Text(
+                        text = if (workout.targetDistanceKm > 0) "${workout.targetDistanceKm.toInt()} km" else "Planned",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Metrics Pods (Pace & HR Zone)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MetricPod(
+                    modifier = Modifier.weight(1f),
+                    label = "Target Pace",
+                    value = workout.targetPace,
+                    sub = "Cruising Speed",
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shape = RoundedCornerShape(14.dp)
+                )
+                MetricPod(
+                    modifier = Modifier.weight(1f),
+                    label = "Target HR",
+                    value = workout.targetHrZone,
+                    sub = "Target Zone",
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    shape = RoundedCornerShape(14.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Workout Structure & Breakdown Card
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "EXECUTION STRUCTURE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    val isThreshold = workout.title.contains("Threshold", ignoreCase = true) || workout.workoutType.contains("Threshold", ignoreCase = true)
+                    val isLongRun = workout.title.contains("Long", ignoreCase = true) || workout.workoutType.contains("Long", ignoreCase = true)
+
+                    val steps = when {
+                        isThreshold -> listOf(
+                            "1. Warm-up" to "1.5 km easy aerobic jog (<148 bpm) + dynamic mobility drills",
+                            "2. Main Work" to "Threshold repeats at ${workout.targetPace} (${workout.targetHrZone}) with 3 min float recoveries",
+                            "3. Cool-down" to "1.5 km flush jog to clear lactate accumulation"
+                        )
+                        isLongRun -> listOf(
+                            "1. Warm-up" to "2.0 km gentle progression building into steady Zone 2",
+                            "2. Main Work" to "Sustained aerobic volume (${workout.targetDistanceKm.toInt()} km total) strictly under ${workout.targetHrZone}",
+                            "3. Hydration" to "Take 25-30g carbs/fuel every 40-45 minutes"
+                        )
+                        else -> listOf(
+                            "1. Warm-up" to "1.0 km gentle jog to elevate heart rate gradually",
+                            "2. Main Work" to "Steady aerobic base running at conversational pace",
+                            "3. Strides" to "Optional 4x20s relaxed strides focusing on form and cadence"
+                        )
+                    }
+
+                    for ((step, detail) in steps) {
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Text(
+                                text = step,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = detail,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Coach Physiology Guidance Card
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Physiological Focus: ${raceCountdown.phase.lowercase().replaceFirstChar { it.uppercase() }}. Maintain polarized intensity — keep easy runs truly easy so quality workouts can be executed with sharp neuromuscular recruitment.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // CTA Button: View Full 10-Week Plan & Race Hub
+            Button(
+                onClick = {
+                    onDismiss()
+                    onViewFullPlan()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(
+                    text = "View 10-Week Plan & Race Strategy →",
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlanRaceHubScreen(
+    payload: CorosWidgetPayload,
+    onNavigateBack: () -> Unit
+) {
+    val rc = payload.raceCountdown
+    val nw = payload.nextWorkout
+    val athlete = payload.athlete
+    val totalWeeks = if (rc.totalWeeks > 0) rc.totalWeeks else 10
+    val currentWeek = if (rc.currentWeek > 0) rc.currentWeek.coerceIn(1, totalWeeks) else 1
+    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Schedule, 1 = Race Strategy
+    val expandedWeeks = remember { mutableStateMapOf<Int, Boolean>().apply { put(currentWeek, true) } }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = if (rc.raceName.isNotBlank()) "${rc.raceName} Plan" else "Half Marathon Plan",
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            imageVector = rememberArrowBackVector(),
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            PrimaryTabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.primary
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text("Schedule", fontWeight = FontWeight.Bold) }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = { Text("Race Strategy", fontWeight = FontWeight.Bold) }
+                )
+            }
+
+            when (selectedTab) {
+                0 -> {
+                    // Schedule Tab
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        // Hero Next Scheduled Workout
+                        if (nw.targetDistanceKm > 0 || (nw.title.isNotBlank() && nw.title != "No Scheduled Workout")) {
+                            item {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "NEXT SCHEDULED WORKOUT · ${nw.dayBadge.uppercase(Locale.US)}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = MaterialTheme.colorScheme.primaryContainer
+                                            ) {
+                                                Text(
+                                                    text = "Planned",
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = nw.title,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Target: ${nw.targetPace}  ·  HR Zone: ${nw.targetHrZone}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Schedule Header
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "$totalWeeks-WEEK CALENDAR SCHEDULE",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "Tap week to expand",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // Collapsible Weeks
+                        items(totalWeeks) { index ->
+                            val week = index + 1
+                            val isCurrentWeek = week == currentWeek
+                            val isExpanded = expandedWeeks[week] == true
+                            val isRaceWeek = week == totalWeeks
+                            val isPeakWeek = week == (totalWeeks * 0.7).toInt()
+                            val isTaperWeek = week == totalWeeks - 1
+
+                            val phaseLabel = when {
+                                isRaceWeek -> "RACE WEEK 🏁"
+                                isTaperWeek -> "TAPER"
+                                isPeakWeek -> "PEAK"
+                                week < (totalWeeks * 0.4).toInt() -> "BASE"
+                                else -> "BUILD"
+                            }
+
+                            val baseVolume = 28.0 + (week * 1.5).coerceAtMost(16.0)
+                            val weeklyKm = if (isRaceWeek) 21.1 + 10.0 else if (isTaperWeek) baseVolume * 0.75 else baseVolume
+                            val longRunKm = if (isRaceWeek) 21.1 else (12.0 + (week * 1.0)).coerceIn(10.0, 22.0)
+
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .clickable {
+                                        expandedWeeks[week] = !isExpanded
+                                    },
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (isCurrentWeek) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = if (isCurrentWeek) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest
+                                            ) {
+                                                Text(
+                                                    text = "W$week",
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = if (isCurrentWeek) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+
+                                            Column {
+                                                Text(
+                                                    text = "Week $week of $totalWeeks",
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Text(
+                                                    text = "${String.format(Locale.US, "%.1f", weeklyKm)} km planned · 4 runs",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (isRaceWeek) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHighest
+                                            ) {
+                                                Text(
+                                                    text = phaseLabel,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (isRaceWeek) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Icon(
+                                                imageVector = if (isExpanded) rememberArrowUpVector() else rememberArrowDownVector(),
+                                                contentDescription = if (isExpanded) "Collapse" else "Expand",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+
+                                    if (isExpanded) {
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            val tTitle = if (week < 4) "Threshold 2x3K" else if (week < 8) "Threshold 2x4K" else "Tempo 8K"
+                                            val tKm = if (week < 4) 8.0 else if (week < 8) 10.0 else 11.0
+                                            PlanWorkoutRow(
+                                                title = "W$week Tue · $tTitle",
+                                                desc = "Lactate threshold stimulus. Target: ${athlete.ltspPace} at Zone 4 (${athlete.lthr} bpm).",
+                                                distanceKm = tKm
+                                            )
+
+                                            PlanWorkoutRow(
+                                                title = "W$week Wed · Easy 6K",
+                                                desc = "Aerobic base recovery. Conversational effort (<152 bpm).",
+                                                distanceKm = 6.0
+                                            )
+
+                                            PlanWorkoutRow(
+                                                title = "W$week Fri · Easy 6K + 4 Strides",
+                                                desc = "Aerobic volume with 4x20s neuromuscular strides on flats.",
+                                                distanceKm = 6.0
+                                            )
+
+                                            if (isRaceWeek) {
+                                                PlanWorkoutRow(
+                                                    title = "🏁 W$week Sun · ${rc.raceName.ifBlank { "Half Marathon" }}",
+                                                    desc = "Target Finish: ${rc.goalTime} · Cruising Pace: ${rc.goalPace}. Execute fueling strategy!",
+                                                    distanceKm = 21.1,
+                                                    isRace = true
+                                                )
+                                            } else {
+                                                PlanWorkoutRow(
+                                                    title = "W$week Sun · Long Run ${longRunKm.toInt()}K",
+                                                    desc = "Aerobic endurance builder. Keep heart rate strictly inside Zone 2 (<155 bpm).",
+                                                    distanceKm = longRunKm
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                1 -> {
+                    // Race Strategy Tab
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        item {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow
+                            ) {
+                                Column(modifier = Modifier.padding(18.dp)) {
+                                    Text(
+                                        text = "TARGET RACE ROADMAP",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = rc.raceName.ifBlank { "HALF MARATHON" },
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Target Date: ${rc.raceDate.ifBlank { "Upcoming" }}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        MetricPod(
+                                            modifier = Modifier.weight(1f),
+                                            label = "Days Left",
+                                            value = "${rc.daysLeft}",
+                                            sub = if (rc.daysLeft > 0) "Countdown" else "Race Day",
+                                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            shape = RoundedCornerShape(16.dp)
+                                        )
+                                        MetricPod(
+                                            modifier = Modifier.weight(1f),
+                                            label = "Readiness",
+                                            value = if (rc.readinessTag.contains("ON TRACK")) "ON TRACK" else "BUILDING",
+                                            sub = "COROS EvoLab Status",
+                                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            shape = RoundedCornerShape(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Target Pace vs Current Fitness
+                        item {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow
+                            ) {
+                                Column(modifier = Modifier.padding(18.dp)) {
+                                    Text(
+                                        text = "TARGET PACE VS CURRENT FITNESS",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = "Goal Finish Time",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = rc.goalTime,
+                                                style = MaterialTheme.typography.titleLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text(
+                                                text = "Goal Target Pace",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = rc.goalPace,
+                                                style = MaterialTheme.typography.titleLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant
+                                    )
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = "Current Threshold Pace",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = rc.currentLtsp,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text(
+                                                text = "Lactate Threshold HR",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "${rc.currentLthr} bpm",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Periodization Macrocycle
+                        item {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow
+                            ) {
+                                Column(modifier = Modifier.padding(18.dp)) {
+                                    Text(
+                                        text = "PERIODIZATION MACROCYCLE",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Current: ${rc.phase}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        MacrocyclePhaseCard(
+                                            phase = "Phase 1 · Aerobic Base Foundation",
+                                            detail = "Builds mitochondrial density, capillary network, and joint durability at Zone 2."
+                                        )
+                                        MacrocyclePhaseCard(
+                                            phase = "Phase 2 · Threshold & Tempo Overload",
+                                            detail = "Raises lactate clearing ceiling and locks in race-specific cruising speed."
+                                        )
+                                        MacrocyclePhaseCard(
+                                            phase = "Phase 3 · Peak Volume & Race Taper",
+                                            detail = "Supercompensation phase shedding accumulated fatigue while keeping fast-twitch recruitment sharp."
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanWorkoutRow(
+    title: String,
+    desc: String,
+    distanceKm: Double,
+    isRace: Boolean = false
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = if (isRace) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isRace) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = desc,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isRace) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isRace) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+            ) {
+                Text(
+                    text = "${distanceKm.toInt()} km",
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isRace) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MacrocyclePhaseCard(phase: String, detail: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = phase,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun rememberPlanVector(): ImageVector = remember {
+    ImageVector.Builder(
+        name = "Plan",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(
+            fill = SolidColor(Color.White),
+            pathFillType = PathFillType.NonZero
+        ) {
+            moveTo(19.0f, 4.0f)
+            horizontalLineToRelative(-1.0f)
+            verticalLineTo(2.0f)
+            horizontalLineToRelative(-2.0f)
+            verticalLineToRelative(2.0f)
+            horizontalLineTo(8.0f)
+            verticalLineTo(2.0f)
+            horizontalLineTo(6.0f)
+            verticalLineToRelative(2.0f)
+            horizontalLineTo(5.0f)
+            curveTo(3.89f, 4.0f, 3.01f, 4.9f, 3.01f, 6.0f)
+            lineTo(3.0f, 20.0f)
+            curveToRelative(0.0f, 1.1f, 0.89f, 2.0f, 2.0f, 2.0f)
+            horizontalLineToRelative(14.0f)
+            curveToRelative(1.1f, 0.0f, 2.0f, -0.9f, 2.0f, -2.0f)
+            verticalLineTo(6.0f)
+            curveToRelative(0.0f, -1.1f, -0.9f, -2.0f, -2.0f, -2.0f)
+            close()
+            moveTo(19.0f, 20.0f)
+            horizontalLineTo(5.0f)
+            verticalLineTo(10.0f)
+            horizontalLineToRelative(14.0f)
+            verticalLineToRelative(10.0f)
+            close()
+            moveTo(19.0f, 8.0f)
+            horizontalLineTo(5.0f)
+            verticalLineTo(6.0f)
+            horizontalLineToRelative(14.0f)
+            verticalLineToRelative(2.0f)
+            close()
+        }
+    }.build()
+}
+
+@Composable
+private fun rememberArrowBackVector(): ImageVector = remember {
+    ImageVector.Builder(
+        name = "ArrowBack",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(
+            fill = SolidColor(Color.White),
+            pathFillType = PathFillType.NonZero
+        ) {
+            moveTo(20.0f, 11.0f)
+            lineTo(7.83f, 11.0f)
+            lineTo(13.42f, 5.41f)
+            lineTo(12.0f, 4.0f)
+            lineTo(4.0f, 12.0f)
+            lineTo(12.0f, 20.0f)
+            lineTo(13.41f, 18.59f)
+            lineTo(7.83f, 13.0f)
+            lineTo(20.0f, 13.0f)
+            close()
+        }
+    }.build()
+}
+
+@Composable
+private fun rememberArrowDownVector(): ImageVector = remember {
+    ImageVector.Builder(
+        name = "ArrowDown",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(
+            fill = SolidColor(Color.White),
+            pathFillType = PathFillType.NonZero
+        ) {
+            moveTo(7.41f, 8.59f)
+            lineTo(12.0f, 13.17f)
+            lineTo(16.59f, 8.59f)
+            lineTo(18.0f, 10.0f)
+            lineTo(12.0f, 16.0f)
+            lineTo(6.0f, 10.0f)
+            close()
+        }
+    }.build()
+}
+
+@Composable
+private fun rememberArrowUpVector(): ImageVector = remember {
+    ImageVector.Builder(
+        name = "ArrowUp",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(
+            fill = SolidColor(Color.White),
+            pathFillType = PathFillType.NonZero
+        ) {
+            moveTo(7.41f, 15.41f)
+            lineTo(12.0f, 10.83f)
+            lineTo(16.59f, 15.41f)
+            lineTo(18.0f, 14.0f)
+            lineTo(12.0f, 8.0f)
+            lineTo(6.0f, 14.0f)
             close()
         }
     }.build()
