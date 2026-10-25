@@ -38,6 +38,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -163,7 +165,31 @@ class MainActivity : ComponentActivity() {
                 NavHost(
                     navController = navController,
                     startDestination = Screen.Main.route,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    enterTransition = {
+                        slideInHorizontally(
+                            initialOffsetX = { fullWidth -> (fullWidth * 0.35f).toInt() },
+                            animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                        ) + fadeIn(animationSpec = tween(durationMillis = 150))
+                    },
+                    exitTransition = {
+                        slideOutHorizontally(
+                            targetOffsetX = { fullWidth -> (-fullWidth * 0.2f).toInt() },
+                            animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                        ) + fadeOut(animationSpec = tween(durationMillis = 150))
+                    },
+                    popEnterTransition = {
+                        slideInHorizontally(
+                            initialOffsetX = { fullWidth -> (-fullWidth * 0.2f).toInt() },
+                            animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                        ) + fadeIn(animationSpec = tween(durationMillis = 150))
+                    },
+                    popExitTransition = {
+                        slideOutHorizontally(
+                            targetOffsetX = { fullWidth -> (fullWidth * 0.35f).toInt() },
+                            animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                        ) + fadeOut(animationSpec = tween(durationMillis = 150))
+                    }
                 ) {
                     composable(Screen.Main.route) {
                         MainAppScaffold(
@@ -2206,7 +2232,13 @@ private fun PlanRaceHubScreen(
     val athlete = payload.athlete
     val totalWeeks = if (rc.totalWeeks > 0) rc.totalWeeks else 10
     val currentWeek = if (rc.currentWeek > 0) rc.currentWeek.coerceIn(1, totalWeeks) else 1
-    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
+    val pagerState = rememberPagerState(initialPage = initialTab.coerceIn(0, 1), pageCount = { 2 })
+    val coroutineScope = rememberCoroutineScope()
+    LaunchedEffect(initialTab) {
+        if (pagerState.currentPage != initialTab.coerceIn(0, 1)) {
+            pagerState.scrollToPage(initialTab.coerceIn(0, 1))
+        }
+    }
     val expandedWeeks = remember { mutableStateMapOf<Int, Boolean>().apply { put(currentWeek, true) } }
 
     Scaffold(
@@ -2248,53 +2280,35 @@ private fun PlanRaceHubScreen(
                 .padding(padding)
         ) {
             PrimaryTabRow(
-                selectedTabIndex = selectedTab,
+                selectedTabIndex = pagerState.currentPage,
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.primary
             ) {
                 Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
+                    selected = pagerState.currentPage == 0,
+                    onClick = {
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(0)
+                        }
+                    },
                     text = { Text("Schedule", fontWeight = FontWeight.Bold) }
                 )
                 Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
+                    selected = pagerState.currentPage == 1,
+                    onClick = {
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(1)
+                        }
+                    },
                     text = { Text("Race Strategy", fontWeight = FontWeight.Bold) }
                 )
             }
 
-            AnimatedContent(
-                targetState = selectedTab,
-                transitionSpec = {
-                    if (targetState > initialState) {
-                        (slideInHorizontally(
-                            initialOffsetX = { it / 3 },
-                            animationSpec = tween(280, easing = FastOutSlowInEasing)
-                        ) + fadeIn(animationSpec = tween(280)))
-                            .togetherWith(
-                                slideOutHorizontally(
-                                    targetOffsetX = { -it / 3 },
-                                    animationSpec = tween(280, easing = FastOutSlowInEasing)
-                                ) + fadeOut(animationSpec = tween(200))
-                            )
-                    } else {
-                        (slideInHorizontally(
-                            initialOffsetX = { -it / 3 },
-                            animationSpec = tween(280, easing = FastOutSlowInEasing)
-                        ) + fadeIn(animationSpec = tween(280)))
-                            .togetherWith(
-                                slideOutHorizontally(
-                                    targetOffsetX = { it / 3 },
-                                    animationSpec = tween(280, easing = FastOutSlowInEasing)
-                                ) + fadeOut(animationSpec = tween(200))
-                            )
-                    }
-                },
-                label = "PlanHubTabTransition",
+            HorizontalPager(
+                state = pagerState,
                 modifier = Modifier.fillMaxSize()
-            ) { tab ->
-                when (tab) {
+            ) { page ->
+                when (page) {
                 0 -> {
                     // Schedule Tab
                     LazyColumn(
