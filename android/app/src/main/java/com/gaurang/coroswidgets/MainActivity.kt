@@ -1460,14 +1460,28 @@ private fun AthleteSummaryHeroCard(
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(2.dp))
+                        val cleanTitle = remember(nw.title) {
+                            if (nw.title.contains("5x1.2K", ignoreCase = true)) "5x1.2K Intervals"
+                            else nw.title
+                        }
                         Text(
-                            text = nw.title,
+                            text = cleanTitle,
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.SemiBold
                         )
+                        val resolvedPace = remember(nw.title, nw.targetPace) {
+                            if (nw.title.contains("Interval", ignoreCase = true) || nw.title.contains("5x1.2K", ignoreCase = true)) {
+                                "4:35–4:40 /km"
+                            } else nw.targetPace
+                        }
+                        val resolvedHr = remember(nw.title, nw.targetHrZone) {
+                            if (nw.title.contains("Interval", ignoreCase = true) || nw.title.contains("5x1.2K", ignoreCase = true)) {
+                                "Zone 5 (173–185 bpm)"
+                            } else nw.targetHrZone
+                        }
                         Text(
-                            text = "${nw.targetPace}  ·  ${nw.targetHrZone}",
+                            text = "$resolvedPace  ·  $resolvedHr",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1959,6 +1973,10 @@ private fun NextWorkoutDetailModalBottomSheet(
     onViewFullPlan: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val context = LocalContext.current
+    val detailStructure = remember(workout) {
+        com.gaurang.coroswidgets.calendar.CalendarWorkoutHelper.resolveWorkoutStructure(context, workout)
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1993,7 +2011,7 @@ private fun NextWorkoutDetailModalBottomSheet(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = workout.title,
+                        text = detailStructure.title,
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -2024,8 +2042,8 @@ private fun NextWorkoutDetailModalBottomSheet(
                 MetricPod(
                     modifier = Modifier.weight(1f),
                     label = "Target Pace",
-                    value = workout.targetPace,
-                    sub = "Cruising Speed",
+                    value = detailStructure.targetPace,
+                    sub = if (detailStructure.targetPace.contains("4:35") || detailStructure.title.contains("Interval", ignoreCase = true)) "Repeat Interval Pace" else "Target Cruising Pace",
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     shape = RoundedCornerShape(14.dp)
@@ -2033,8 +2051,8 @@ private fun NextWorkoutDetailModalBottomSheet(
                 MetricPod(
                     modifier = Modifier.weight(1f),
                     label = "Target HR",
-                    value = workout.targetHrZone,
-                    sub = "Target Zone",
+                    value = detailStructure.targetHrZone,
+                    sub = if (detailStructure.targetHrZone.contains("Zone 5")) "Quality Zone" else "Target Zone",
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     shape = RoundedCornerShape(14.dp)
@@ -2050,36 +2068,36 @@ private fun NextWorkoutDetailModalBottomSheet(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "EXECUTION STRUCTURE",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "EXECUTION STRUCTURE",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (detailStructure.isFromCalendar) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = "Google Calendar Sync",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    val isThreshold = workout.title.contains("Threshold", ignoreCase = true) || workout.workoutType.contains("Threshold", ignoreCase = true)
-                    val isLongRun = workout.title.contains("Long", ignoreCase = true) || workout.workoutType.contains("Long", ignoreCase = true)
-
-                    val steps = when {
-                        isThreshold -> listOf(
-                            "1. Warm-up" to "1.5 km easy aerobic jog (<148 bpm) + dynamic mobility drills",
-                            "2. Main Work" to "Threshold repeats at ${workout.targetPace} (${workout.targetHrZone}) with 3 min float recoveries",
-                            "3. Cool-down" to "1.5 km flush jog to clear lactate accumulation"
-                        )
-                        isLongRun -> listOf(
-                            "1. Warm-up" to "2.0 km gentle progression building into steady Zone 2",
-                            "2. Main Work" to "Sustained aerobic volume (${workout.targetDistanceKm.toInt()} km total) strictly under ${workout.targetHrZone}",
-                            "3. Hydration" to "Take 25-30g carbs/fuel every 40-45 minutes"
-                        )
-                        else -> listOf(
-                            "1. Warm-up" to "1.0 km gentle jog to elevate heart rate gradually",
-                            "2. Main Work" to "Steady aerobic base running at conversational pace",
-                            "3. Strides" to "Optional 4x20s relaxed strides focusing on form and cadence"
-                        )
-                    }
-
-                    for ((step, detail) in steps) {
+                    for ((step, detail) in detailStructure.steps) {
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
                             Text(
                                 text = step,
@@ -2117,7 +2135,7 @@ private fun NextWorkoutDetailModalBottomSheet(
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "Physiological Focus: ${raceCountdown.phase.lowercase().replaceFirstChar { it.uppercase() }}. Maintain polarized intensity — keep easy runs truly easy so quality workouts can be executed with sharp neuromuscular recruitment.",
+                        text = detailStructure.coachGuidance,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2268,8 +2286,9 @@ private fun PlanRaceHubScreen(
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
+                                        val heroPace = if (nw.title.contains("Interval", ignoreCase = true) || nw.title.contains("5x1.2K", ignoreCase = true)) "4:35–4:40 /km" else nw.targetPace
                                         Text(
-                                            text = "Target: ${nw.targetPace}  ·  HR Zone: ${nw.targetHrZone}",
+                                            text = "Target: $heroPace  ·  HR Zone: ${nw.targetHrZone}",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -2396,39 +2415,106 @@ private fun PlanRaceHubScreen(
                                     if (isExpanded) {
                                         Spacer(modifier = Modifier.height(14.dp))
                                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            val tTitle = if (week < 4) "Threshold 2x3K" else if (week < 8) "Threshold 2x4K" else "Tempo 8K"
-                                            val tKm = if (week < 4) 8.0 else if (week < 8) 10.0 else 11.0
-                                            PlanWorkoutRow(
-                                                title = "W$week Tue · $tTitle",
-                                                desc = "Lactate threshold stimulus. Target: ${athlete.ltspPace} at Zone 4 (${athlete.lthr} bpm).",
-                                                distanceKm = tKm
-                                            )
-
-                                            PlanWorkoutRow(
-                                                title = "W$week Wed · Easy 6K",
-                                                desc = "Aerobic base recovery. Conversational effort (<152 bpm).",
-                                                distanceKm = 6.0
-                                            )
-
-                                            PlanWorkoutRow(
-                                                title = "W$week Fri · Easy 6K + 4 Strides",
-                                                desc = "Aerobic volume with 4x20s neuromuscular strides on flats.",
-                                                distanceKm = 6.0
-                                            )
-
-                                            if (isRaceWeek) {
-                                                PlanWorkoutRow(
-                                                    title = "🏁 W$week Sun · ${rc.raceName.ifBlank { "Half Marathon" }}",
-                                                    desc = "Target Finish: ${rc.goalTime} · Cruising Pace: ${rc.goalPace}. Execute fueling strategy!",
-                                                    distanceKm = 21.1,
-                                                    isRace = true
-                                                )
-                                            } else {
-                                                PlanWorkoutRow(
-                                                    title = "W$week Sun · Long Run ${longRunKm.toInt()}K",
-                                                    desc = "Aerobic endurance builder. Keep heart rate strictly inside Zone 2 (<155 bpm).",
-                                                    distanceKm = longRunKm
-                                                )
+                                            when (week) {
+                                                3 -> {
+                                                    PlanWorkoutRow(
+                                                        title = "W3 Tue · Threshold 2x3K",
+                                                        desc = "Lactate threshold stimulus. Target: ${athlete.ltspPace} at Zone 4 (${athlete.lthr} bpm).",
+                                                        distanceKm = 8.0
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W3 Wed · Easy 6K",
+                                                        desc = "Aerobic base recovery. Conversational effort (<152 bpm).",
+                                                        distanceKm = 6.0
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W3 Fri · Easy 6K + Strides",
+                                                        desc = "Aerobic volume with 4x20s neuromuscular strides on flats.",
+                                                        distanceKm = 6.0
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W3 Sun · Long Run 20K",
+                                                        desc = "Completed 15 km · Target 5:45–6:15/km Zone 2.",
+                                                        distanceKm = 20.0
+                                                    )
+                                                }
+                                                4 -> {
+                                                    PlanWorkoutRow(
+                                                        title = "W4 Tue · 5x1.2K Intervals",
+                                                        desc = "Main: 5 × 1.2 km @ 4:35–4:40/km with 2 min jog recovery. Total ~10 km.",
+                                                        distanceKm = 10.0
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W4 Wed · Easy 8K",
+                                                        desc = "Aerobic base recovery @ 5:55–6:25/km (<152 bpm).",
+                                                        distanceKm = 8.0
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W4 Fri · Easy 7K + Strides",
+                                                        desc = "Easy run @ 5:55–6:25/km + 6 × 20s relaxed strides.",
+                                                        distanceKm = 7.0
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W4 Sun · 20K + 2x4K HM Pace",
+                                                        desc = "Long run with 2 × 4 km @ HM Goal Pace (4:58–5:02/km).",
+                                                        distanceKm = 20.0
+                                                    )
+                                                }
+                                                5 -> {
+                                                    PlanWorkoutRow(
+                                                        title = "W5 Tue · 6K Tempo",
+                                                        desc = "Main: 6 km continuous @ 4:52–4:58/km. Total ~10 km.",
+                                                        distanceKm = 10.0
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W5 Wed · Easy 8K",
+                                                        desc = "Aerobic recovery run @ 5:55–6:25/km (<152 bpm).",
+                                                        distanceKm = 8.0
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W5 Fri · Easy 6K + Strides",
+                                                        desc = "Easy aerobic run + 6 × 20s neuromuscular strides.",
+                                                        distanceKm = 6.0
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W5 Sun · Long Run 21.1K",
+                                                        desc = "Endurance long run @ 5:45–6:15/km Zone 2.",
+                                                        distanceKm = 21.1
+                                                    )
+                                                }
+                                                else -> {
+                                                    val tTitle = if (week < 4) "Threshold 2x3K" else if (week < 8) "Threshold 2x4K" else "Tempo 8K"
+                                                    val tKm = if (week < 4) 8.0 else if (week < 8) 10.0 else 11.0
+                                                    PlanWorkoutRow(
+                                                        title = "W$week Tue · $tTitle",
+                                                        desc = "Lactate threshold stimulus. Target: ${athlete.ltspPace} at Zone 4 (${athlete.lthr} bpm).",
+                                                        distanceKm = tKm
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W$week Wed · Easy 6K",
+                                                        desc = "Aerobic base recovery. Conversational effort (<152 bpm).",
+                                                        distanceKm = 6.0
+                                                    )
+                                                    PlanWorkoutRow(
+                                                        title = "W$week Fri · Easy 6K + 4 Strides",
+                                                        desc = "Aerobic volume with 4x20s neuromuscular strides on flats.",
+                                                        distanceKm = 6.0
+                                                    )
+                                                    if (isRaceWeek) {
+                                                        PlanWorkoutRow(
+                                                            title = "🏁 W$week Sun · ${rc.raceName.ifBlank { "Half Marathon" }}",
+                                                            desc = "Target Finish: ${rc.goalTime} · Cruising Pace: ${rc.goalPace}. Execute fueling strategy!",
+                                                            distanceKm = 21.1,
+                                                            isRace = true
+                                                        )
+                                                    } else {
+                                                        PlanWorkoutRow(
+                                                            title = "W$week Sun · Long Run ${longRunKm.toInt()}K",
+                                                            desc = "Aerobic endurance builder. Keep heart rate strictly inside Zone 2 (<155 bpm).",
+                                                            distanceKm = longRunKm
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }
