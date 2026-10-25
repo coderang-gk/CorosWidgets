@@ -307,7 +307,7 @@ private fun MainAppScaffold(
                     )
                 },
                 actions = {
-                    FilledTonalIconButton(
+                    IconButton(
                         onClick = onCalendarClicked,
                         modifier = Modifier.padding(end = 4.dp)
                     ) {
@@ -449,7 +449,10 @@ private fun TrainingHubSection(
 
         // 2. Weekly Mileage Bar & 7-Day M-S Schedule Card
         item {
-            WeeklyMileageProgressCard(payload = payload)
+            WeeklyMileageProgressCard(
+                payload = payload,
+                onPlanClicked = onRaceClicked
+            )
         }
 
         // 3. Tappable Latest Run Analysis Card (opens detailed modal on tap)
@@ -569,7 +572,10 @@ private fun WidgetsGallerySection(
 }
 
 @Composable
-private fun WeeklyMileageProgressCard(payload: CorosWidgetPayload) {
+private fun WeeklyMileageProgressCard(
+    payload: CorosWidgetPayload,
+    onPlanClicked: (() -> Unit)? = null
+) {
     val wm = payload.weeklyMileage
     val weekProgress = (wm.completionPct / 100f).coerceIn(0f, 1f)
     val expectedProgress = (wm.expectedCompletionPct / 100f).coerceIn(0f, 1f)
@@ -638,7 +644,7 @@ private fun WeeklyMileageProgressCard(payload: CorosWidgetPayload) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(14.dp)
+                    .height(12.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             ) {
@@ -718,7 +724,7 @@ private fun WeeklyMileageProgressCard(payload: CorosWidgetPayload) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(7.dp)
+                                    .height(6.dp)
                                     .clip(CircleShape)
                                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                             ) {
@@ -735,6 +741,35 @@ private fun WeeklyMileageProgressCard(payload: CorosWidgetPayload) {
                         }
                     }
                 }
+            }
+
+            // Footer row linking to full Plan & Race Hub
+            Spacer(modifier = Modifier.height(14.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = onPlanClicked != null) { onPlanClicked?.invoke() },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val rc = payload.raceCountdown
+                val raceLabel = rc.raceName.ifBlank { "Half Marathon" }
+                    .split(" ")
+                    .joinToString(" ") { word -> word.lowercase(Locale.US).replaceFirstChar { it.uppercase(Locale.US) } }
+                Text(
+                    text = "Week ${rc.currentWeek} of ${rc.totalWeeks} · $raceLabel Plan",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Text(
+                    text = "View Plan →",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }
@@ -1342,12 +1377,19 @@ private fun AthleteSummaryHeroCard(
                         .clip(CircleShape)
                         .clickable(enabled = onRaceClicked != null) { onRaceClicked?.invoke() }
                 ) {
+                    val statusText = if (rc.daysLeft > 0) {
+                        "🏁 ${rc.daysLeft}d to Race"
+                    } else {
+                        "COROS · ${tl.statusBadge}"
+                    }
                     Text(
-                        text = "${rc.raceName.ifBlank { "Pune HM" }} · ${rc.daysLeft}d",
+                        text = statusText,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1405,8 +1447,14 @@ private fun AthleteSummaryHeroCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
+                        val cleanDayBadge = remember(nw.dayBadge) {
+                            if (nw.dayBadge.isBlank()) "Next"
+                            else nw.dayBadge.split(" ").joinToString(" ") { word ->
+                                word.lowercase(Locale.US).replaceFirstChar { it.uppercase(Locale.US) }
+                            }
+                        }
                         Text(
-                            text = "NEXT WORKOUT · ${nw.dayBadge}",
+                            text = "NEXT WORKOUT · $cleanDayBadge",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
@@ -1464,16 +1512,31 @@ private fun AthleteSummaryHeroCard(
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(2.dp))
+                            val raceDisplayName = remember(rc.raceName) {
+                                rc.raceName.ifBlank { "Half Marathon" }
+                                    .split(" ")
+                                    .joinToString(" ") { word -> word.lowercase(Locale.US).replaceFirstChar { it.uppercase(Locale.US) } }
+                            }
                             Text(
-                                text = rc.raceName.ifBlank { "HALF MARATHON" },
+                                text = raceDisplayName,
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            val cleanPhase = remember(rc.phase) {
+                                rc.phase
+                                    .replace("+", "&")
+                                    .split(" ")
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" ") { word ->
+                                        if (word == "&") "&"
+                                        else word.lowercase(Locale.US).replaceFirstChar { it.uppercase(Locale.US) }
+                                    }
+                            }
                             Text(
-                                text = "Week ${rc.currentWeek} of ${rc.totalWeeks} · ${rc.phase}",
+                                text = "Week ${rc.currentWeek} of ${rc.totalWeeks} · $cleanPhase",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -1917,8 +1980,13 @@ private fun NextWorkoutDetailModalBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
+                    val cleanBadge = remember(workout.dayBadge) {
+                        workout.dayBadge.split(" ").joinToString(" ") { word ->
+                            word.lowercase(Locale.US).replaceFirstChar { it.uppercase(Locale.US) }
+                        }
+                    }
                     Text(
-                        text = "NEXT SCHEDULED WORKOUT · ${workout.dayBadge.uppercase(Locale.US)}",
+                        text = "NEXT SCHEDULED WORKOUT · $cleanBadge",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
@@ -2093,10 +2161,16 @@ private fun PlanRaceHubScreen(
 
     Scaffold(
         topBar = {
+            val cleanRaceName = remember(rc.raceName) {
+                if (rc.raceName.isBlank()) "Half Marathon"
+                else rc.raceName.split(" ").joinToString(" ") { word ->
+                    word.lowercase(Locale.US).replaceFirstChar { it.uppercase(Locale.US) }
+                }
+            }
             TopAppBar(
                 title = {
                     Text(
-                        text = if (rc.raceName.isNotBlank()) "${rc.raceName} Plan" else "Half Marathon Plan",
+                        text = "$cleanRaceName Plan",
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -2162,8 +2236,13 @@ private fun PlanRaceHubScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
+                                            val cleanDay = remember(nw.dayBadge) {
+                                                nw.dayBadge.split(" ").joinToString(" ") { word ->
+                                                    word.lowercase(Locale.US).replaceFirstChar { it.uppercase(Locale.US) }
+                                                }
+                                            }
                                             Text(
-                                                text = "NEXT SCHEDULED WORKOUT · ${nw.dayBadge.uppercase(Locale.US)}",
+                                                text = "NEXT SCHEDULED WORKOUT · $cleanDay",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.primary,
                                                 fontWeight = FontWeight.Bold

@@ -242,12 +242,12 @@ object WidgetRepository {
 
         val rcObj = root.optJSONObject("race_countdown") ?: JSONObject()
         val raceCountdown = RaceCountdownData(
-            raceName = rcObj.optString("race_name", "PUNE HALF MARATHON"),
+            raceName = rcObj.optString("race_name", "Pune Half Marathon"),
             raceDate = rcObj.optString("race_date", "2026-12-13"),
-            daysLeft = rcObj.optInt("days_left", 51),
+            daysLeft = rcObj.optInt("days_left", 49),
             currentWeek = rcObj.optInt("current_week", 3),
             totalWeeks = rcObj.optInt("total_weeks", 10),
-            phase = rcObj.optString("phase", "AEROBIC + THRESHOLD BUILD"),
+            phase = rcObj.optString("phase", "Aerobic & Threshold Build"),
             goalTime = rcObj.optString("goal_time", "1:45:00"),
             goalPace = rcObj.optString("goal_pace", "4:58 /km"),
             currentLtsp = rcObj.optString("current_ltsp", "4:56 /km"),

@@ -84,12 +84,12 @@ data class ZoneSpectrumData(
 )
 
 data class RaceCountdownData(
-    val raceName: String = "PUNE HALF MARATHON",
+    val raceName: String = "Pune Half Marathon",
     val raceDate: String = "2026-12-13",
-    val daysLeft: Int = 51,
+    val daysLeft: Int = 49,
     val currentWeek: Int = 3,
     val totalWeeks: Int = 10,
-    val phase: String = "AEROBIC + THRESHOLD BUILD",
+    val phase: String = "Aerobic & Threshold Build",
     val goalTime: String = "1:45:00",
     val goalPace: String = "4:58 /km",
     val currentLtsp: String = "4:56 /km",
@@ -332,42 +332,42 @@ enum class ExpressiveTileType(
 ) {
     WEEKLY_MILEAGE(
         "Mileage Bars",
-        "4 stacked capsule bars ('Device Info' style)",
+        "4 stacked capsule bars with weekly volume",
         "2x2",
         1.0f,
         true
     ),
     TRAINING_LOAD(
         "EvoLab Ring",
-        "Two-tone donut ring ('Battery Ring' style)",
+        "Concentric load donut and readiness score",
         "2x2",
         1.0f,
         true
     ),
     NEXT_WORKOUT(
         "Next Run Pods",
-        "Circle + squircle pods ('Clock Battery' style)",
+        "Circle and squircle next workout pods",
         "2x2",
         1.0f,
         true
     ),
     ZONE_SPECTRUM(
         "80/20 Split Shapes",
-        "Top pill bar + geometric icons ('Battery Icons' style)",
+        "Aerobic vs threshold heart rate balance",
         "2x2",
         1.0f,
         true
     ),
     RACE_COUNTDOWN(
         "Pune HM Scallop",
-        "12-lobe flower cookie ('UV Index / Pressure' style)",
+        "12-lobe race countdown flower scallop",
         "2x2",
         1.0f,
         true
     ),
     COMMAND_CENTER(
         "Liquid Progress",
-        "Royal liquid fill + scalloped badge ('Battery Progress' style)",
+        "Weekly mileage progress and upcoming splits",
         "2x2",
         1.0f,
         false

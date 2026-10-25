@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">COROS Widgets</string>
-    <string name="widget_weekly_mileage_label">Mileage Bars (2×2)</string>
+    <string name="widget_weekly_mileage_label">Weekly Mileage</string>
     <string name="widget_weekly_mileage_desc">Weekly mileage progress bars and tilted run bean</string>
-    <string name="widget_training_load_label">EvoLab Ring (2×2)</string>
+    <string name="widget_training_load_label">Training Load</string>
     <string name="widget_training_load_desc">Training load ring and readiness flower</string>
-    <string name="widget_next_workout_label">Mileage Pods (2×2)</string>
-    <string name="widget_next_workout_desc">Dual mileage pods and weekly workout plan</string>
-    <string name="widget_zone_spectrum_label">80/20 Split (2×2)</string>
+    <string name="widget_next_workout_label">Next Workout</string>
+    <string name="widget_next_workout_desc">Upcoming scheduled workout and training runs</string>
+    <string name="widget_zone_spectrum_label">80/20 Zone Balance</string>
     <string name="widget_zone_spectrum_desc">Zone 2 aerobic percentage and HR split</string>
-    <string name="widget_race_countdown_label">Pune HM Countdown (2×2)</string>
+    <string name="widget_race_countdown_label">Race Countdown</string>
     <string name="widget_race_countdown_desc">Days to race, threshold pace, and goal time</string>
-    <string name="widget_command_center_label">Run Progress (2×2)</string>
+    <string name="widget_command_center_label">Command Center</string>
     <string name="widget_command_center_desc">Weekly progress card and EvoLab splits</string>
 </resources>
